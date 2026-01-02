@@ -3,6 +3,8 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci
 COPY . .
+ARG VITE_LOGO_DEV_TOKEN
+ENV VITE_LOGO_DEV_TOKEN=$VITE_LOGO_DEV_TOKEN
 RUN npm run build
 
 FROM nginx:alpine
