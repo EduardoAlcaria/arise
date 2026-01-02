@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { X, Eye, EyeOff, Search, GitBranch, Loader2, ChevronRight, ChevronLeft, Check, AlertTriangle, Lock, Rocket, Plus, Trash2, Layers, FolderOpen, KeyRound, Database } from 'lucide-react'
+import { X, Eye, EyeOff, Search, GitBranch, Loader2, ChevronRight, ChevronLeft, Check, AlertTriangle, Lock, Rocket, Plus, Trash2, Layers, FolderOpen, KeyRound, Database, Cloud } from 'lucide-react'
 import { saveGitHubToken, getRepos, getBranches, getRepoEnvVars } from '../api/github'
 import { getInfisicalStatus, getInfisicalSecrets } from '../api/infisical'
+import { getCloudflareStatus } from '../api/cloudflare'
 import type { AppServiceItem, ConfigFileItem } from '../api/deployments'
 import type { GitHubRepo, GitHubBranch } from '../types'
 import type { Machine } from '../types'
@@ -72,6 +73,7 @@ export default function DeployRepoWizard({
   const [envVars, setEnvVars] = useState<Record<string, string>>({})
   const [loadingEnvVars, setLoadingEnvVars] = useState(false)
   const [infisicalConnected, setInfisicalConnected] = useState(false)
+  const [cloudflareConfigured, setCloudflareConfigured] = useState(false)
   const [infisicalModalOpen, setInfisicalModalOpen] = useState(false)
   const [infisicalEnv, setInfisicalEnv] = useState('dev')
   const [loadingInfisical, setLoadingInfisical] = useState(false)
@@ -79,8 +81,8 @@ export default function DeployRepoWizard({
 
   useEffect(() => {
     if (isConnected) loadReposFromBackend()
-    // Check infisical status
     getInfisicalStatus().then(s => setInfisicalConnected(s.connected)).catch(() => {})
+    getCloudflareStatus().then(s => setCloudflareConfigured(s.configured)).catch(() => {})
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Pre-populate with initialRepoForDeploy
@@ -764,13 +766,19 @@ export default function DeployRepoWizard({
                   style={{ background: tunnelEnabled ? 'var(--color-muted)' : 'transparent' }}
                 >
                   <span className="flex items-center gap-2 text-foreground">
-                    <span style={{ fontSize: '14px' }}>☁</span> Cloudflare Tunnel
+                    <Cloud size={13} /> Cloudflare Tunnel
                     <span className="text-muted-foreground font-normal">(optional)</span>
                   </span>
                   <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${tunnelEnabled ? 'bg-primary text-primary-foreground' : 'bg-muted-foreground/20 text-muted-foreground'}`}>
                     {tunnelEnabled ? 'ON' : 'OFF'}
                   </span>
                 </button>
+                {tunnelEnabled && !cloudflareConfigured && (
+                  <div className="mt-2 flex gap-2 items-start rounded-lg px-3 py-2.5 text-xs border border-amber-400/20 bg-amber-400/5 text-amber-400">
+                    <AlertTriangle size={12} className="shrink-0 mt-0.5" />
+                    <span>Cloudflare credentials not configured. Go to <strong>Settings → Cloudflare</strong> to add your API token and Account ID first.</span>
+                  </div>
+                )}
                 {tunnelEnabled && (
                   <div className="mt-2 flex flex-col gap-2 border border-border rounded-lg p-3 bg-muted/10">
                     <div className="grid grid-cols-2 gap-2">
