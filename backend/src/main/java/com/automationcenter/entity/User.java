@@ -42,6 +42,18 @@ public class User implements UserDetails {
     @Column
     private String cloudflareAccountId;
 
+    @Column
+    private String infisicalClientId;
+
+    @Column(columnDefinition = "TEXT")
+    private String infisicalClientSecret;
+
+    @Column
+    private String infisicalBaseUrl;
+
+    @Column
+    private String infisicalProjectId;
+
     @CreationTimestamp
     private LocalDateTime createdAt;
 
