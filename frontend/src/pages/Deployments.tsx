@@ -1,11 +1,13 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { getDeployments, createDeployment, rollbackDeployment, getDeploymentLogs } from '../api/deployments'
+import type { Deployment } from '../types'
 import { getMachines } from '../api/machines'
 import { getGitHubUser, type GHUser } from '../api/github'
 import { Plus, RotateCcw, FileText, X, ChevronLeft, ChevronRight, Search, Rocket } from 'lucide-react'
 import { StackIcon, StatusDot } from '../components/icons'
 import DeployRepoWizard, { type DeployItem, type AppDeployPayload } from '../components/DeployRepoWizard'
+import DeploymentWatcher from '../components/DeploymentWatcher'
 
 function statusCls(s: string) {
   if (s === 'SUCCESS') return 'status-online'
@@ -23,6 +25,7 @@ export default function Deployments() {
   const [isDeploying, setIsDeploying] = useState(false)
   const [ghUser, setGhUser] = useState<GHUser | null>(null)
   const [ghChecked, setGhChecked] = useState(false)
+  const [watching, setWatching] = useState<{ id: number; name: string } | null>(null)
 
   const { data, isLoading } = useQuery({ queryKey: ['deployments', page], queryFn: () => getDeployments(page) })
   const { data: machines } = useQuery({ queryKey: ['machines'], queryFn: getMachines })
@@ -51,17 +54,20 @@ export default function Deployments() {
   const handleDeploy = async (items: DeployItem[]) => {
     setIsDeploying(true)
     try {
+      let first: Deployment | null = null
       for (const item of items) {
-        await createDeployment({
+        const dep = await createDeployment({
           name: item.name,
           type: 'REPOSITORY',
           repositoryUrl: item.repoUrl,
           branch: item.branch,
           machineId: item.machineId,
         })
+        if (!first) first = dep
       }
       qc.invalidateQueries({ queryKey: ['deployments'] })
       setShowWizard(false)
+      if (first) setWatching({ id: first.id, name: first.name })
     } finally {
       setIsDeploying(false)
     }
@@ -70,7 +76,7 @@ export default function Deployments() {
   const handleAppDeploy = async (payload: AppDeployPayload) => {
     setIsDeploying(true)
     try {
-      await createDeployment({
+      const dep = await createDeployment({
         name: payload.name,
         type: 'APPLICATION',
         machineId: payload.machineId,
@@ -82,6 +88,7 @@ export default function Deployments() {
       })
       qc.invalidateQueries({ queryKey: ['deployments'] })
       setShowWizard(false)
+      setWatching({ id: dep.id, name: dep.name })
     } finally {
       setIsDeploying(false)
     }
@@ -183,6 +190,14 @@ export default function Deployments() {
           onAppDeploy={handleAppDeploy}
           isDeploying={isDeploying}
           onPatValidated={user => setGhUser(user)}
+        />
+      )}
+
+      {watching && (
+        <DeploymentWatcher
+          deploymentId={watching.id}
+          deploymentName={watching.name}
+          onClose={() => { setWatching(null); qc.invalidateQueries({ queryKey: ['deployments'] }) }}
         />
       )}
 
