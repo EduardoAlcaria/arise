@@ -6,6 +6,7 @@ import { getMachines } from '../api/machines'
 import { Search, Rocket, FileText, RotateCcw, X, Link2Off } from 'lucide-react'
 import { GitHubIcon, StackIcon, StatusDot } from '../components/icons'
 import DeployRepoWizard, { type DeployItem, type AppDeployPayload } from '../components/DeployRepoWizard'
+import DeploymentWatcher from '../components/DeploymentWatcher'
 
 interface GHUser { login: string; avatar_url: string }
 
@@ -23,6 +24,7 @@ export default function GitHub() {
   const [showWizard, setShowWizard] = useState(false)
   const [search, setSearch] = useState('')
   const [logsModal, setLogsModal] = useState<{ id: number; name: string } | null>(null)
+  const [watching, setWatching] = useState<{ id: number; name: string } | null>(null)
 
   // Check if a GitHub token is saved in the backend DB
   const { data: reposCheck, isError: noToken, isPending: checkingToken } = useQuery({
@@ -61,22 +63,25 @@ export default function GitHub() {
   )
 
   const handleDeploy = async (items: DeployItem[]) => {
+    let first = null
     for (const item of items) {
-      await deployMut.mutateAsync({
+      const dep = await deployMut.mutateAsync({
         name: item.name,
         type: 'REPOSITORY',
         repositoryUrl: item.repoUrl,
         branch: item.branch,
         machineId: item.machineId,
       })
+      if (!first) first = dep
     }
     qc.invalidateQueries({ queryKey: ['deployments-repo'] })
     qc.invalidateQueries({ queryKey: ['deployments', 0] })
     setShowWizard(false)
+    if (first) setWatching({ id: first.id, name: first.name })
   }
 
   const handleAppDeploy = async (payload: AppDeployPayload) => {
-    await deployMut.mutateAsync({
+    const dep = await deployMut.mutateAsync({
       name: payload.name,
       type: 'APPLICATION',
       machineId: payload.machineId,
@@ -89,6 +94,7 @@ export default function GitHub() {
     qc.invalidateQueries({ queryKey: ['deployments-repo'] })
     qc.invalidateQueries({ queryKey: ['deployments', 0] })
     setShowWizard(false)
+    setWatching({ id: dep.id, name: dep.name })
   }
 
   const handlePatValidated = (user: GHUser) => {
@@ -234,6 +240,14 @@ export default function GitHub() {
           onAppDeploy={handleAppDeploy}
           isDeploying={deployMut.isPending}
           onPatValidated={handlePatValidated}
+        />
+      )}
+
+      {watching && (
+        <DeploymentWatcher
+          deploymentId={watching.id}
+          deploymentName={watching.name}
+          onClose={() => { setWatching(null); qc.invalidateQueries({ queryKey: ['deployments-repo'] }) }}
         />
       )}
 
