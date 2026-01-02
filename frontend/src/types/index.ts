@@ -71,6 +71,9 @@ export interface GitHubRepo {
   url: string
   private: boolean
   defaultBranch: string
+  language: string | null
+  stargazersCount: number
+  updatedAt: string | null
 }
 
 export interface GitHubBranch {
