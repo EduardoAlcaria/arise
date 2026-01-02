@@ -10,6 +10,7 @@ import Containers from './pages/Containers'
 import Deployments from './pages/Deployments'
 import GitHub from './pages/GitHub'
 import Cloudflare from './pages/Cloudflare'
+import Settings from './pages/Settings'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -38,6 +39,7 @@ export default function App() {
             <Route path="deployments" element={<Deployments />} />
             <Route path="github" element={<GitHub />} />
             <Route path="cloudflare" element={<Cloudflare />} />
+            <Route path="settings" element={<Settings />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
