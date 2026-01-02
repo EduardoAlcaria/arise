@@ -46,4 +46,11 @@ public class CloudflareController {
     public ResponseEntity<List<CloudflareTunnelResponse>> listTunnels(@AuthenticationPrincipal User user) {
         return ResponseEntity.ok(cloudflareService.listTunnels(user.getId()));
     }
+
+    @GetMapping("/status")
+    public ResponseEntity<Map<String, Boolean>> getStatus(@AuthenticationPrincipal User user) {
+        boolean configured = user.getCloudflareToken() != null && !user.getCloudflareToken().isBlank()
+                && user.getCloudflareAccountId() != null && !user.getCloudflareAccountId().isBlank();
+        return ResponseEntity.ok(Map.of("configured", configured));
+    }
 }
