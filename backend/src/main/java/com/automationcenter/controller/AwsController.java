@@ -2,6 +2,7 @@ package com.automationcenter.controller;
 
 import com.automationcenter.entity.User;
 import com.automationcenter.service.AwsService;
+import com.automationcenter.service.AwsTopologyService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -16,6 +17,7 @@ import java.util.Map;
 public class AwsController {
 
     private final AwsService awsService;
+    private final AwsTopologyService awsTopologyService;
 
     @GetMapping("/ec2/instances")
     public ResponseEntity<List<Map<String, Object>>> listInstances(
@@ -77,5 +79,13 @@ public class AwsController {
             @RequestParam(required = false) String region,
             @AuthenticationPrincipal User user) {
         return ResponseEntity.ok(awsService.listEcsServices(user.getId(), accountId, clusterArn, region));
+    }
+
+    @GetMapping("/topology")
+    public ResponseEntity<Map<String, Object>> getTopology(
+            @PathVariable Long accountId,
+            @RequestParam(required = false) String region,
+            @AuthenticationPrincipal User user) {
+        return ResponseEntity.ok(awsTopologyService.getTopology(user.getId(), accountId, region));
     }
 }
