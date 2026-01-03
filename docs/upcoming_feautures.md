@@ -66,7 +66,15 @@
 ✅ All runners view (no repo filter required — aggregated across all repos)
 ✅ Runner deletion from UI
 
-### Planned
+### Redesign (Planned)
+
+* **Repo-card layout** — home view shows cards per repo (no filter required); click card to enter repo context
+* Inside repo context: tabs for Runs, Workflows, Runners — identical feel to GitHub Actions
+* Run detail view: full step log per job, same two-panel layout as DeploymentWatcher (step sidebar + live log)
+* Runners shown per-repo and globally; add/remove from card UI
+* No mandatory repo selection — all repos visible at a glance on load
+
+### Other Planned
 
 * Visual pipeline builder
 * Queue visualization
