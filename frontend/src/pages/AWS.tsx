@@ -5,12 +5,12 @@ import {
   listEc2Instances, listS3Buckets, listEcsClusters, listEcsServices,
   startInstance, stopInstance, terminateInstance, listTraces, getTopology,
 } from '../api/aws'
-import { listAwsAccounts, createAwsAccount, updateAwsAccount, deleteAwsAccount } from '../api/awsAccounts'
+import { listAwsAccounts, createAwsAccount, updateAwsAccount, deleteAwsAccount, ssoLogin } from '../api/awsAccounts'
 import type { AwsAccountResponse } from '../api/awsAccounts'
 import {
   Server, HardDrive, Box, Play, Square, Trash2, ChevronDown, ChevronRight,
   AlertTriangle, Loader2, RefreshCw, Plus, X, CheckCircle, XCircle, Network,
-  Activity, Key, Pencil,
+  Activity, Key, Pencil, LogIn, ExternalLink, Copy,
 } from 'lucide-react'
 
 const REGIONS = [
@@ -28,11 +28,12 @@ function stateColor(state: string) {
 
 // ── Account card ─────────────────────────────────────────────────────────────
 
-function AccountCard({ account, selected, onSelect, onEdit, onDelete }: {
+function AccountCard({ account, selected, onSelect, onEdit, onSsoLogin, onDelete }: {
   account: AwsAccountResponse
   selected: boolean
   onSelect: () => void
   onEdit: () => void
+  onSsoLogin: () => void
   onDelete: () => void
 }) {
   return (
@@ -51,7 +52,20 @@ function AccountCard({ account, selected, onSelect, onEdit, onDelete }: {
       <div className="flex items-center gap-2 shrink-0">
         {account.reachable
           ? <CheckCircle size={14} className="text-green-400" />
-          : <XCircle size={14} className="text-destructive" />}
+          : <button
+              onClick={e => { e.stopPropagation(); onSsoLogin() }}
+              className="flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full border text-destructive border-destructive/30 bg-destructive/5 hover:bg-destructive/15 transition-colors"
+              title="SSO token expired — click to login"
+            >
+              <LogIn size={10} />Login
+            </button>}
+        <button
+          onClick={e => { e.stopPropagation(); onSsoLogin() }}
+          className="p-1 rounded text-muted-foreground hover:text-primary transition-colors"
+          title="Refresh SSO token"
+        >
+          <LogIn size={12} />
+        </button>
         <button
           onClick={e => { e.stopPropagation(); onEdit() }}
           className="p-1 rounded text-muted-foreground hover:text-foreground transition-colors"
@@ -68,6 +82,89 @@ function AccountCard({ account, selected, onSelect, onEdit, onDelete }: {
         </button>
       </div>
     </button>
+  )
+}
+
+// ── SSO login modal ───────────────────────────────────────────────────────────
+
+function SsoLoginModal({ account, onClose }: { account: AwsAccountResponse; onClose: () => void }) {
+  const qc = useQueryClient()
+  const [copied, setCopied] = useState(false)
+  const mut = useMutation({
+    mutationFn: () => ssoLogin(account.id),
+  })
+
+  const copy = (text: string) => {
+    navigator.clipboard.writeText(text)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+      <div className="bg-card border border-border rounded-2xl w-full max-w-md shadow-xl">
+        <div className="px-5 py-4 border-b border-border flex items-center justify-between">
+          <p className="text-sm font-semibold text-foreground">AWS SSO Login — {account.profileName}</p>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors"><X size={16} /></button>
+        </div>
+        <div className="px-5 py-5 flex flex-col gap-4">
+          {!mut.data && !mut.isPending && !mut.isError && (
+            <div className="flex flex-col gap-3">
+              <p className="text-sm text-muted-foreground">Click below to start the SSO login flow. A URL and verification code will appear — open the URL in your browser and enter the code.</p>
+              <button
+                onClick={() => mut.mutate()}
+                className="flex items-center justify-center gap-2 px-5 py-2.5 bg-primary text-primary-foreground text-sm font-semibold rounded-lg hover:opacity-90 transition-all"
+              >
+                <LogIn size={14} />Start SSO Login
+              </button>
+            </div>
+          )}
+
+          {mut.isPending && (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground py-4 justify-center">
+              <Loader2 size={15} className="animate-spin" />Starting SSO login…
+            </div>
+          )}
+
+          {mut.isError && (
+            <div className="flex gap-2 items-start rounded-lg px-3 py-2 text-xs text-destructive border border-destructive/20 bg-destructive/5">
+              <AlertTriangle size={12} className="shrink-0 mt-0.5" />
+              {(mut.error as any)?.response?.data?.message ?? (mut.error as any)?.message ?? 'Failed to start SSO login'}
+            </div>
+          )}
+
+          {mut.data && (
+            <div className="flex flex-col gap-4">
+              <div className="flex flex-col gap-2">
+                <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-widest">1. Open this URL in your browser</p>
+                <div className="flex items-center gap-2 bg-muted/40 rounded-lg px-3 py-2 border border-border">
+                  <code className="text-xs text-foreground flex-1 break-all">{mut.data.url}</code>
+                  <div className="flex gap-1 shrink-0">
+                    <a href={mut.data.url} target="_blank" rel="noopener noreferrer" className="p-1 text-muted-foreground hover:text-foreground transition-colors"><ExternalLink size={12} /></a>
+                    <button onClick={() => copy(mut.data!.url)} className="p-1 text-muted-foreground hover:text-foreground transition-colors"><Copy size={12} /></button>
+                  </div>
+                </div>
+              </div>
+              <div className="flex flex-col gap-2">
+                <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-widest">2. Enter this code</p>
+                <div className="flex items-center gap-3 bg-muted/40 rounded-lg px-3 py-2 border border-border">
+                  <code className="text-xl font-bold tracking-widest text-foreground flex-1 font-mono">{mut.data.code}</code>
+                  <button onClick={() => copy(mut.data!.code)} className="p-1 text-muted-foreground hover:text-foreground transition-colors"><Copy size={12} /></button>
+                </div>
+                {copied && <p className="text-[11px] text-green-400">Copied!</p>}
+              </div>
+              <p className="text-xs text-muted-foreground">Once you approve in the browser, the token is written automatically. Close this dialog and try your AWS request again.</p>
+              <button
+                onClick={() => { qc.invalidateQueries({ queryKey: ['aws-accounts'] }); onClose() }}
+                className="px-4 py-2 text-sm font-semibold bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition-all"
+              >
+                Done
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -403,6 +500,7 @@ export default function AWS() {
   const qc = useQueryClient()
   const [showRegister, setShowRegister] = useState(false)
   const [editingAccount, setEditingAccount] = useState<AwsAccountResponse | null>(null)
+  const [ssoLoginAccount, setSsoLoginAccount] = useState<AwsAccountResponse | null>(null)
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [tab, setTab] = useState<Tab>('ec2')
   const [region, setRegion] = useState('us-east-1')
@@ -437,6 +535,7 @@ export default function AWS() {
     <div className="p-6 max-w-6xl mx-auto">
       {showRegister && <RegisterModal onClose={() => setShowRegister(false)} />}
       {editingAccount && <RegisterModal editing={editingAccount} onClose={() => setEditingAccount(null)} />}
+      {ssoLoginAccount && <SsoLoginModal account={ssoLoginAccount} onClose={() => setSsoLoginAccount(null)} />}
 
       {/* Account list */}
       <div className="mb-5">
@@ -469,6 +568,7 @@ export default function AWS() {
                 selected={selected?.id === a.id}
                 onSelect={() => setSelectedId(a.id)}
                 onEdit={() => setEditingAccount(a)}
+                onSsoLogin={() => setSsoLoginAccount(a)}
                 onDelete={() => deleteMut.mutate(a.id)}
               />
             ))}
