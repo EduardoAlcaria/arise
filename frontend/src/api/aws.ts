@@ -35,41 +35,72 @@ export interface EcsService {
   taskDefinition: string
 }
 
-export interface AwsStatus {
-  configured: boolean
-  region?: string
-  accountId?: string
-  userArn?: string
-  error?: string
+export interface TraceItem {
+  id: string
+  duration: number | null
+  responseTime: number | null
+  hasFault: boolean
+  hasError: boolean
+  hasThrottle: boolean
+  url?: string
+  method?: string
+  clientIp?: string
+  serviceCount: number
 }
 
-export const saveAwsCredentials = (accessKeyId: string, secretAccessKey: string, region: string) =>
-  client.post<{ accountId: string; userArn: string; region: string }>('/aws/credentials', {
-    accessKeyId, secretAccessKey, region,
-  }).then(r => r.data)
+export interface TopologyGraph {
+  nodes: TopologyNode[]
+  edges: TopologyEdge[]
+  region: string
+}
 
-export const getAwsStatus = () =>
-  client.get<AwsStatus>('/aws/status').then(r => r.data)
+export interface TopologyNode {
+  id: string
+  label: string
+  service: string
+  source: 'live' | 'terraform'
+  [key: string]: unknown
+}
 
-export const listEc2Instances = (region?: string) =>
-  client.get<Ec2Instance[]>('/aws/ec2/instances', { params: region ? { region } : {} }).then(r => r.data)
+export interface TopologyEdge {
+  id: string
+  source: string
+  target: string
+  label: string
+}
 
-export const startInstance = (instanceId: string, region?: string) =>
-  client.post(`/aws/ec2/instances/${instanceId}/start`, null, { params: region ? { region } : {} })
+const base = (accountId: number) => `/aws/accounts/${accountId}`
 
-export const stopInstance = (instanceId: string, region?: string) =>
-  client.post(`/aws/ec2/instances/${instanceId}/stop`, null, { params: region ? { region } : {} })
+export const listEc2Instances = (accountId: number, region?: string) =>
+  client.get<Ec2Instance[]>(`${base(accountId)}/ec2/instances`, { params: region ? { region } : {} }).then(r => r.data)
 
-export const terminateInstance = (instanceId: string, region?: string) =>
-  client.delete(`/aws/ec2/instances/${instanceId}`, { params: region ? { region } : {} })
+export const startInstance = (accountId: number, instanceId: string, region?: string) =>
+  client.post(`${base(accountId)}/ec2/instances/${instanceId}/start`, null, { params: region ? { region } : {} })
 
-export const listS3Buckets = () =>
-  client.get<S3Bucket[]>('/aws/s3/buckets').then(r => r.data)
+export const stopInstance = (accountId: number, instanceId: string, region?: string) =>
+  client.post(`${base(accountId)}/ec2/instances/${instanceId}/stop`, null, { params: region ? { region } : {} })
 
-export const listEcsClusters = (region?: string) =>
-  client.get<EcsCluster[]>('/aws/ecs/clusters', { params: region ? { region } : {} }).then(r => r.data)
+export const terminateInstance = (accountId: number, instanceId: string, region?: string) =>
+  client.delete(`${base(accountId)}/ec2/instances/${instanceId}`, { params: region ? { region } : {} })
 
-export const listEcsServices = (clusterArn: string, region?: string) =>
-  client.get<EcsService[]>(`/aws/ecs/clusters/${encodeURIComponent(clusterArn)}/services`, {
+export const listS3Buckets = (accountId: number) =>
+  client.get<S3Bucket[]>(`${base(accountId)}/s3/buckets`).then(r => r.data)
+
+export const listEcsClusters = (accountId: number, region?: string) =>
+  client.get<EcsCluster[]>(`${base(accountId)}/ecs/clusters`, { params: region ? { region } : {} }).then(r => r.data)
+
+export const listEcsServices = (accountId: number, clusterArn: string, region?: string) =>
+  client.get<EcsService[]>(`${base(accountId)}/ecs/clusters/${encodeURIComponent(clusterArn)}/services`, {
     params: region ? { region } : {},
   }).then(r => r.data)
+
+export const getTopology = (accountId: number, region?: string) =>
+  client.get<TopologyGraph>(`${base(accountId)}/topology`, { params: region ? { region } : {} }).then(r => r.data)
+
+export const listTraces = (accountId: number, region?: string, minutes = 60) =>
+  client.get<TraceItem[]>(`${base(accountId)}/traces`, { params: { ...(region ? { region } : {}), minutes } }).then(r => r.data)
+
+export const getTrace = (accountId: number, traceId: string, region?: string) =>
+  client.get<{ id: string; duration: number; segments: { id: string; document: string }[] }>(
+    `${base(accountId)}/traces/${traceId}`, { params: region ? { region } : {} }
+  ).then(r => r.data)
