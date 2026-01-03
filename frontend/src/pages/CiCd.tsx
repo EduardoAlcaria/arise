@@ -465,8 +465,11 @@ type Tab = 'runs' | 'workflows' | 'runners'
 
 export default function CiCd() {
   const qc = useQueryClient()
-  const [tab, setTab] = useState<Tab>('runs')
-  const [selectedRepo, setSelectedRepo] = useState<string>('')
+  const [tab, setTab] = useState<Tab>(() => (localStorage.getItem('cicd:tab') as Tab) ?? 'runs')
+  const [selectedRepo, setSelectedRepo] = useState<string>(() => localStorage.getItem('cicd:repo') ?? '')
+
+  function changeTab(t: Tab) { setTab(t); localStorage.setItem('cicd:tab', t) }
+  function changeRepo(r: string) { setSelectedRepo(r); localStorage.setItem('cicd:repo', r) }
   const [showTrigger, setShowTrigger] = useState(false)
   const [showSetupRunner, setShowSetupRunner] = useState(false)
 
@@ -545,7 +548,7 @@ export default function CiCd() {
         {/* Repo selector */}
         <select
           value={selectedRepo}
-          onChange={e => setSelectedRepo(e.target.value)}
+          onChange={e => changeRepo(e.target.value)}
           className="input w-64"
         >
           <option value="">Select repository…</option>
@@ -570,7 +573,7 @@ export default function CiCd() {
             {TABS.map(({ id, label, icon: Icon }) => (
               <button
                 key={id}
-                onClick={() => setTab(id)}
+                onClick={() => changeTab(id)}
                 className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
                   tab === id
                     ? 'border-primary text-foreground'

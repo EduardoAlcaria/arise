@@ -1319,7 +1319,15 @@ export default function AWS() {
   const [showRegister, setShowRegister] = useState(false)
   const [editingAccount, setEditingAccount] = useState<AwsAccountResponse | null>(null)
   const [ssoLoginAccount, setSsoLoginAccount] = useState<AwsAccountResponse | null>(null)
-  const [treeSelection, setTreeSelection] = useState<TreeSelection | null>(null)
+  const [treeSelection, setTreeSelection] = useState<TreeSelection | null>(() => {
+    try { const s = localStorage.getItem('aws:selection'); return s ? JSON.parse(s) : null } catch { return null }
+  })
+
+  function selectTree(sel: TreeSelection | null) {
+    setTreeSelection(sel)
+    if (sel) localStorage.setItem('aws:selection', JSON.stringify(sel))
+    else localStorage.removeItem('aws:selection')
+  }
   const [topologyVpc, setTopologyVpc] = useState<VpcSummary | null>(null)
 
   const { data: accounts, isLoading } = useQuery({
@@ -1329,7 +1337,7 @@ export default function AWS() {
 
   const deleteMut = useMutation({
     mutationFn: (id: number) => deleteAwsAccount(id),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['aws-accounts'] }); setTreeSelection(null) },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['aws-accounts'] }); selectTree(null) },
   })
 
   const evictMut = useMutation({
@@ -1420,7 +1428,7 @@ export default function AWS() {
           <ResourceTree
             accounts={accounts}
             selected={treeSelection}
-            onSelect={setTreeSelection}
+            onSelect={selectTree}
           />
 
           {/* Right panel */}
