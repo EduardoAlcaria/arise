@@ -284,21 +284,21 @@ public class DataSeeder implements CommandLineRunner {
                 .findFirst().orElse(null);
         if (reactDep != null) {
             String[] lines = {
-                "[INFO] Cloning repository…",
-                "[INFO] Checked out commit a1b2c3d",
-                "[INFO] Detected stack: Node.js (package.json found)",
-                "[INFO] Running: npm install",
-                "[INFO] added 1423 packages in 18s",
-                "[INFO] Running: npm run build",
-                "[INFO] > react-dashboard@1.0.0 build",
-                "[INFO] > vite build",
-                "[INFO] vite v5.2.0 building for production…",
-                "[INFO] dist/index.html  0.46 kB",
-                "[INFO] dist/assets/index-BgXt2V.js  312.40 kB",
-                "[INFO] ✓ built in 4.12s",
-                "[INFO] Starting: npm run preview -- --port 3000",
-                "[INFO] Creating Cloudflare tunnel: demo-react-tunnel",
-                "[INFO] ✓ Deployment successful. Tunnel: https://dashboard.demo.alcaria.dev"
+                "Cloning repository…",
+                "Checked out commit a1b2c3d",
+                "Detected stack: Node.js (package.json found)",
+                "Running: npm install",
+                "added 1423 packages in 18s",
+                "Running: npm run build",
+                "> react-dashboard@1.0.0 build",
+                "> vite build",
+                "vite v5.2.0 building for production…",
+                "dist/index.html  0.46 kB",
+                "dist/assets/index-BgXt2V.js  312.40 kB",
+                "✓ built in 4.12s",
+                "Starting: npm run preview -- --port 3000",
+                "Creating Cloudflare tunnel: demo-react-tunnel",
+                "✓ Deployment successful. Tunnel: https://dashboard.demo.alcaria.dev"
             };
             LogLevel[] levels = {LogLevel.INFO,LogLevel.INFO,LogLevel.INFO,LogLevel.INFO,LogLevel.INFO,
                 LogLevel.INFO,LogLevel.INFO,LogLevel.INFO,LogLevel.INFO,LogLevel.INFO,
@@ -318,11 +318,11 @@ public class DataSeeder implements CommandLineRunner {
                 .findFirst().orElse(null);
         if (etlDep != null) {
             String[][] etlLines = {
-                {"[INFO] Cloning repository…", "INFO"},
-                {"[INFO] Detected stack: Python", "INFO"},
-                {"[INFO] Running: pip install -r requirements.txt", "INFO"},
-                {"[ERROR] Port 5000 already in use — cannot start server.", "ERROR"},
-                {"[ERROR] ✗ Deployment failed.", "ERROR"}
+                {"Cloning repository…", "INFO"},
+                {"Detected stack: Python", "INFO"},
+                {"Running: pip install -r requirements.txt", "INFO"},
+                {"Port 5000 already in use — cannot start server.", "ERROR"},
+                {"✗ Deployment failed.", "ERROR"}
             };
             for (String[] entry : etlLines) {
                 logEntryRepository.save(LogEntry.builder()
