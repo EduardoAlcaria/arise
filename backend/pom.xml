@@ -176,7 +176,7 @@
         </dependency>
         <dependency>
             <groupId>software.amazon.awssdk</groupId>
-            <artifactId>sso-oidc</artifactId>
+            <artifactId>ssooidc</artifactId>
         </dependency>
 
         <!-- Lombok -->
