@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   getWorkflows, getWorkflowRuns, getWorkflowJobs, listRunners, listAllRunners,
@@ -482,6 +482,11 @@ export default function CiCd() {
   const repos = ghRepos
     ? ghRepos.map(r => r.fullName ?? r.name).filter(Boolean)
     : []
+
+  // Auto-select first repo if nothing persisted
+  useEffect(() => {
+    if (!selectedRepo && repos.length > 0) changeRepo(repos[0])
+  }, [repos.length])
 
   const parsed = selectedRepo ? extractOwnerRepo(`github.com/${selectedRepo}`) : null
   const owner = parsed?.owner ?? ''
