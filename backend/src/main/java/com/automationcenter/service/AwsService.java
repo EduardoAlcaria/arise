@@ -1,16 +1,18 @@
 package com.automationcenter.service;
 
+import com.automationcenter.dto.aws.AwsAccountRequest;
+import com.automationcenter.dto.aws.AwsAccountResponse;
+import com.automationcenter.entity.AwsAccount;
 import com.automationcenter.entity.User;
 import com.automationcenter.exception.ResourceNotFoundException;
+import com.automationcenter.repository.AwsAccountRepository;
 import com.automationcenter.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
-import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
+import software.amazon.awssdk.auth.credentials.ProfileCredentialsProvider;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.ec2.Ec2Client;
-import software.amazon.awssdk.services.ec2.model.DescribeInstancesResponse;
 import software.amazon.awssdk.services.ec2.model.StartInstancesRequest;
 import software.amazon.awssdk.services.ec2.model.StopInstancesRequest;
 import software.amazon.awssdk.services.ec2.model.Tag;
@@ -20,7 +22,6 @@ import software.amazon.awssdk.services.ecs.model.DescribeClustersRequest;
 import software.amazon.awssdk.services.ecs.model.DescribeServicesRequest;
 import software.amazon.awssdk.services.ecs.model.ListServicesRequest;
 import software.amazon.awssdk.services.s3.S3Client;
-import software.amazon.awssdk.services.s3.model.Bucket;
 import software.amazon.awssdk.services.sts.StsClient;
 import software.amazon.awssdk.services.sts.model.GetCallerIdentityResponse;
 
@@ -33,64 +34,68 @@ import java.util.Map;
 @Slf4j
 public class AwsService {
 
+    private final AwsAccountRepository accountRepository;
     private final UserRepository userRepository;
 
+    // ── Account CRUD ──────────────────────────────────────────────────────────
 
-    public Map<String, String> saveCredentials(Long userId, String accessKeyId, String secretAccessKey, String region) {
-        StaticCredentialsProvider creds = StaticCredentialsProvider.create(
-                AwsBasicCredentials.create(accessKeyId, secretAccessKey));
-        GetCallerIdentityResponse identity;
+    public AwsAccountResponse createAccount(Long userId, AwsAccountRequest req) {
+        User user = getUser(userId);
+        AwsAccount account = AwsAccount.builder()
+                .name(req.getName())
+                .profileName(req.getProfileName())
+                .defaultRegion(req.getRegion())
+                .terraformRepoUrl(req.getTerraformRepoUrl())
+                .owner(user)
+                .build();
+        // Validate profile works via STS
+        boolean reachable = false;
+        String accountId = null;
         try {
-            identity = StsClient.builder()
-                    .credentialsProvider(creds)
-                    .region(Region.of(region))
+            GetCallerIdentityResponse identity = StsClient.builder()
+                    .credentialsProvider(ProfileCredentialsProvider.create(req.getProfileName()))
+                    .region(Region.of(req.getRegion()))
                     .build()
                     .getCallerIdentity();
+            reachable = true;
+            accountId = identity.account();
         } catch (Exception e) {
-            throw new IllegalArgumentException("Invalid AWS credentials: " + e.getMessage());
+            log.warn("Profile '{}' not reachable during registration: {}", req.getProfileName(), e.getMessage());
         }
-
-        User user = getUser(userId);
-        user.setAwsAccessKeyId(accessKeyId);
-        user.setAwsSecretAccessKey(secretAccessKey);
-        user.setAwsDefaultRegion(region);
-        userRepository.save(user);
-
-        return Map.of(
-                "accountId", identity.account(),
-                "userArn", identity.arn(),
-                "region", region
-        );
+        account = accountRepository.save(account);
+        return toResponse(account, reachable, accountId);
     }
 
-    public Map<String, Object> getStatus(Long userId) {
-        User user = userRepository.findById(userId)
-                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
-        boolean configured = user.getAwsAccessKeyId() != null && !user.getAwsAccessKeyId().isBlank();
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("configured", configured);
-        if (configured) {
-            result.put("region", user.getAwsDefaultRegion());
-            try {
-                GetCallerIdentityResponse identity = StsClient.builder()
-                        .credentialsProvider(credentialsFor(user))
-                        .region(Region.of(user.getAwsDefaultRegion()))
-                        .build()
-                        .getCallerIdentity();
-                result.put("accountId", identity.account());
-                result.put("userArn", identity.arn());
-            } catch (Exception e) {
-                result.put("error", "Could not verify credentials: " + e.getMessage());
-            }
-        }
-        return result;
+    public List<AwsAccountResponse> listAccounts(Long userId) {
+        return accountRepository.findByOwnerId(userId).stream()
+                .map(a -> {
+                    boolean reachable = false;
+                    String accountId = null;
+                    try {
+                        GetCallerIdentityResponse id = StsClient.builder()
+                                .credentialsProvider(ProfileCredentialsProvider.create(a.getProfileName()))
+                                .region(Region.of(a.getDefaultRegion()))
+                                .build()
+                                .getCallerIdentity();
+                        reachable = true;
+                        accountId = id.account();
+                    } catch (Exception ignored) {}
+                    return toResponse(a, reachable, accountId);
+                })
+                .toList();
     }
 
+    public void deleteAccount(Long userId, Long accountId) {
+        AwsAccount account = getAccount(accountId, userId);
+        accountRepository.delete(account);
+    }
 
-    public List<Map<String, Object>> listEc2Instances(Long userId, String region) {
-        User user = getConfiguredUser(userId);
-        String effectiveRegion = region != null ? region : user.getAwsDefaultRegion();
-        try (Ec2Client ec2 = buildEc2Client(user, effectiveRegion)) {
+    // ── EC2 ───────────────────────────────────────────────────────────────────
+
+    public List<Map<String, Object>> listEc2Instances(Long userId, Long accountId, String region) {
+        AwsAccount account = getAccount(accountId, userId);
+        String effectiveRegion = region != null ? region : account.getDefaultRegion();
+        try (Ec2Client ec2 = buildEc2Client(account, effectiveRegion)) {
             return ec2.describeInstances().reservations().stream()
                     .flatMap(r -> r.instances().stream())
                     .map(i -> {
@@ -101,7 +106,7 @@ public class AwsService {
                         item.put("publicIp", i.publicIpAddress());
                         item.put("privateIp", i.privateIpAddress());
                         item.put("launchTime", i.launchTime() != null ? i.launchTime().toString() : null);
-                        item.put("platform", i.platformDetails().toString());
+                        item.put("platform", i.platformDetails());
                         String name = i.tags().stream()
                                 .filter(t -> "Name".equals(t.key()))
                                 .map(Tag::value)
@@ -116,42 +121,43 @@ public class AwsService {
         }
     }
 
-    public void startInstance(Long userId, String instanceId, String region) {
-        User user = getConfiguredUser(userId);
-        String effectiveRegion = region != null ? region : user.getAwsDefaultRegion();
-        try (Ec2Client ec2 = buildEc2Client(user, effectiveRegion)) {
+    public void startInstance(Long userId, Long accountId, String instanceId, String region) {
+        AwsAccount account = getAccount(accountId, userId);
+        String effectiveRegion = region != null ? region : account.getDefaultRegion();
+        try (Ec2Client ec2 = buildEc2Client(account, effectiveRegion)) {
             ec2.startInstances(StartInstancesRequest.builder().instanceIds(instanceId).build());
         } catch (Exception e) {
             throw new IllegalArgumentException("Failed to start instance: " + e.getMessage());
         }
     }
 
-    public void stopInstance(Long userId, String instanceId, String region) {
-        User user = getConfiguredUser(userId);
-        String effectiveRegion = region != null ? region : user.getAwsDefaultRegion();
-        try (Ec2Client ec2 = buildEc2Client(user, effectiveRegion)) {
+    public void stopInstance(Long userId, Long accountId, String instanceId, String region) {
+        AwsAccount account = getAccount(accountId, userId);
+        String effectiveRegion = region != null ? region : account.getDefaultRegion();
+        try (Ec2Client ec2 = buildEc2Client(account, effectiveRegion)) {
             ec2.stopInstances(StopInstancesRequest.builder().instanceIds(instanceId).build());
         } catch (Exception e) {
             throw new IllegalArgumentException("Failed to stop instance: " + e.getMessage());
         }
     }
 
-    public void terminateInstance(Long userId, String instanceId, String region) {
-        User user = getConfiguredUser(userId);
-        String effectiveRegion = region != null ? region : user.getAwsDefaultRegion();
-        try (Ec2Client ec2 = buildEc2Client(user, effectiveRegion)) {
+    public void terminateInstance(Long userId, Long accountId, String instanceId, String region) {
+        AwsAccount account = getAccount(accountId, userId);
+        String effectiveRegion = region != null ? region : account.getDefaultRegion();
+        try (Ec2Client ec2 = buildEc2Client(account, effectiveRegion)) {
             ec2.terminateInstances(TerminateInstancesRequest.builder().instanceIds(instanceId).build());
         } catch (Exception e) {
             throw new IllegalArgumentException("Failed to terminate instance: " + e.getMessage());
         }
     }
 
+    // ── S3 ────────────────────────────────────────────────────────────────────
 
-    public List<Map<String, Object>> listS3Buckets(Long userId) {
-        User user = getConfiguredUser(userId);
+    public List<Map<String, Object>> listS3Buckets(Long userId, Long accountId) {
+        AwsAccount account = getAccount(accountId, userId);
         try (S3Client s3 = S3Client.builder()
-                .credentialsProvider(credentialsFor(user))
-                .region(Region.of(user.getAwsDefaultRegion()))
+                .credentialsProvider(credentialsFor(account))
+                .region(Region.of(account.getDefaultRegion()))
                 .build()) {
             return s3.listBuckets().buckets().stream()
                     .map(b -> {
@@ -166,11 +172,12 @@ public class AwsService {
         }
     }
 
+    // ── ECS ───────────────────────────────────────────────────────────────────
 
-    public List<Map<String, Object>> listEcsClusters(Long userId, String region) {
-        User user = getConfiguredUser(userId);
-        String effectiveRegion = region != null ? region : user.getAwsDefaultRegion();
-        try (EcsClient ecs = buildEcsClient(user, effectiveRegion)) {
+    public List<Map<String, Object>> listEcsClusters(Long userId, Long accountId, String region) {
+        AwsAccount account = getAccount(accountId, userId);
+        String effectiveRegion = region != null ? region : account.getDefaultRegion();
+        try (EcsClient ecs = buildEcsClient(account, effectiveRegion)) {
             List<String> arns = ecs.listClusters().clusterArns();
             if (arns.isEmpty()) return List.of();
             return ecs.describeClusters(DescribeClustersRequest.builder().clusters(arns).build())
@@ -191,10 +198,10 @@ public class AwsService {
         }
     }
 
-    public List<Map<String, Object>> listEcsServices(Long userId, String clusterArn, String region) {
-        User user = getConfiguredUser(userId);
-        String effectiveRegion = region != null ? region : user.getAwsDefaultRegion();
-        try (EcsClient ecs = buildEcsClient(user, effectiveRegion)) {
+    public List<Map<String, Object>> listEcsServices(Long userId, Long accountId, String clusterArn, String region) {
+        AwsAccount account = getAccount(accountId, userId);
+        String effectiveRegion = region != null ? region : account.getDefaultRegion();
+        try (EcsClient ecs = buildEcsClient(account, effectiveRegion)) {
             List<String> arns = ecs.listServices(ListServicesRequest.builder().cluster(clusterArn).build()).serviceArns();
             if (arns.isEmpty()) return List.of();
             return ecs.describeServices(DescribeServicesRequest.builder().cluster(clusterArn).services(arns).build())
@@ -215,24 +222,29 @@ public class AwsService {
         }
     }
 
+    // ── Helpers ───────────────────────────────────────────────────────────────
 
-    private StaticCredentialsProvider credentialsFor(User user) {
-        return StaticCredentialsProvider.create(
-                AwsBasicCredentials.create(user.getAwsAccessKeyId(), user.getAwsSecretAccessKey()));
+    private ProfileCredentialsProvider credentialsFor(AwsAccount account) {
+        return ProfileCredentialsProvider.create(account.getProfileName());
     }
 
-    private Ec2Client buildEc2Client(User user, String region) {
+    private Ec2Client buildEc2Client(AwsAccount account, String region) {
         return Ec2Client.builder()
-                .credentialsProvider(credentialsFor(user))
+                .credentialsProvider(credentialsFor(account))
                 .region(Region.of(region))
                 .build();
     }
 
-    private EcsClient buildEcsClient(User user, String region) {
+    private EcsClient buildEcsClient(AwsAccount account, String region) {
         return EcsClient.builder()
-                .credentialsProvider(credentialsFor(user))
+                .credentialsProvider(credentialsFor(account))
                 .region(Region.of(region))
                 .build();
+    }
+
+    private AwsAccount getAccount(Long accountId, Long userId) {
+        return accountRepository.findByIdAndOwnerId(accountId, userId)
+                .orElseThrow(() -> new ResourceNotFoundException("AWS account not found"));
     }
 
     private User getUser(Long userId) {
@@ -240,11 +252,16 @@ public class AwsService {
                 .orElseThrow(() -> new ResourceNotFoundException("User not found"));
     }
 
-    private User getConfiguredUser(Long userId) {
-        User user = getUser(userId);
-        if (user.getAwsAccessKeyId() == null || user.getAwsAccessKeyId().isBlank()) {
-            throw new IllegalArgumentException("AWS credentials not configured. Please save them in Settings.");
-        }
-        return user;
+    private AwsAccountResponse toResponse(AwsAccount a, boolean reachable, String awsAccountId) {
+        return AwsAccountResponse.builder()
+                .id(a.getId())
+                .name(a.getName())
+                .profileName(a.getProfileName())
+                .defaultRegion(a.getDefaultRegion())
+                .terraformRepoUrl(a.getTerraformRepoUrl())
+                .createdAt(a.getCreatedAt())
+                .reachable(reachable)
+                .accountId(awsAccountId)
+                .build();
     }
 }
