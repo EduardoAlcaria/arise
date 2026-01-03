@@ -593,68 +593,86 @@ public class DeploymentService {
     private static final java.util.Map<String, java.util.Map<String, String>> INSTALL_MAP;
     static {
         INSTALL_MAP = new java.util.HashMap<>();
+        INSTALL_MAP.put("pip", Map.of(
+            "apt-get", "DEBIAN_FRONTEND=noninteractive apt-get install -y python3-pip",
+            "yum",     "yum install -y python3-pip",
+            "dnf",     "dnf install -y python3-pip",
+            "apk",     "apk add --no-cache py3-pip",
+            "brew",    "brew install python3",
+            "pacman",  "pacman -Sy --noconfirm python-pip",
+            "zypper",  "zypper install -y python3-pip"
+        ));
         INSTALL_MAP.put("git", Map.of(
             "apt-get", "DEBIAN_FRONTEND=noninteractive apt-get install -y git",
             "yum",     "yum install -y git",
             "dnf",     "dnf install -y git",
             "apk",     "apk add --no-cache git",
-            "brew",    "brew install git"
+            "brew",    "brew install git",
+            "pacman",  "pacman -Sy --noconfirm git",
+            "zypper",  "zypper install -y git"
         ));
         INSTALL_MAP.put("docker", Map.of(
             "apt-get", "curl -fsSL https://get.docker.com | sh && systemctl enable docker 2>/dev/null; systemctl start docker 2>/dev/null; true",
             "yum",     "curl -fsSL https://get.docker.com | sh && systemctl enable docker 2>/dev/null; systemctl start docker 2>/dev/null; true",
             "dnf",     "curl -fsSL https://get.docker.com | sh && systemctl enable docker 2>/dev/null; systemctl start docker 2>/dev/null; true",
             "apk",     "apk add --no-cache docker && rc-update add docker boot 2>/dev/null; service docker start 2>/dev/null; true",
-            "brew",    "brew install --cask docker"
+            "brew",    "brew install --cask docker",
+            "pacman",  "pacman -Sy --noconfirm docker && systemctl enable docker && systemctl start docker",
+            "zypper",  "zypper install -y docker && systemctl enable docker && systemctl start docker"
         ));
         INSTALL_MAP.put("docker compose", Map.of(
             "apt-get", "DEBIAN_FRONTEND=noninteractive apt-get install -y docker-compose-plugin",
             "yum",     "yum install -y docker-compose-plugin",
             "dnf",     "dnf install -y docker-compose-plugin",
             "apk",     "apk add --no-cache docker-compose",
-            "brew",    "brew install docker-compose"
+            "brew",    "brew install docker-compose",
+            "pacman",  "pacman -Sy --noconfirm docker-compose",
+            "zypper",  "zypper install -y docker-compose"
         ));
         INSTALL_MAP.put("node", Map.of(
             "apt-get", "DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs",
             "yum",     "yum install -y nodejs",
             "dnf",     "dnf install -y nodejs",
             "apk",     "apk add --no-cache nodejs",
-            "brew",    "brew install node"
+            "brew",    "brew install node",
+            "pacman",  "pacman -Sy --noconfirm nodejs",
+            "zypper",  "zypper install -y nodejs"
         ));
         INSTALL_MAP.put("npm", Map.of(
             "apt-get", "DEBIAN_FRONTEND=noninteractive apt-get install -y npm",
             "yum",     "yum install -y npm",
             "dnf",     "dnf install -y npm",
             "apk",     "apk add --no-cache npm",
-            "brew",    "brew install node"
+            "brew",    "brew install node",
+            "pacman",  "pacman -Sy --noconfirm npm",
+            "zypper",  "zypper install -y npm"
         ));
         INSTALL_MAP.put("java", Map.of(
             "apt-get", "DEBIAN_FRONTEND=noninteractive apt-get install -y openjdk-17-jdk",
             "yum",     "yum install -y java-17-openjdk-devel",
             "dnf",     "dnf install -y java-17-openjdk-devel",
             "apk",     "apk add --no-cache openjdk17",
-            "brew",    "brew install openjdk"
+            "brew",    "brew install openjdk",
+            "pacman",  "pacman -Sy --noconfirm jdk17-openjdk",
+            "zypper",  "zypper install -y java-17-openjdk"
         ));
         INSTALL_MAP.put("maven (mvn)", Map.of(
             "apt-get", "DEBIAN_FRONTEND=noninteractive apt-get install -y maven",
             "yum",     "yum install -y maven",
             "dnf",     "dnf install -y maven",
             "apk",     "apk add --no-cache maven",
-            "brew",    "brew install maven"
+            "brew",    "brew install maven",
+            "pacman",  "pacman -Sy --noconfirm maven",
+            "zypper",  "zypper install -y maven"
         ));
         INSTALL_MAP.put("python3", Map.of(
             "apt-get", "DEBIAN_FRONTEND=noninteractive apt-get install -y python3",
             "yum",     "yum install -y python3",
             "dnf",     "dnf install -y python3",
             "apk",     "apk add --no-cache python3",
-            "brew",    "brew install python3"
-        ));
-        INSTALL_MAP.put("pip", Map.of(
-            "apt-get", "DEBIAN_FRONTEND=noninteractive apt-get install -y python3-pip",
-            "yum",     "yum install -y python3-pip",
-            "dnf",     "dnf install -y python3-pip",
-            "apk",     "apk add --no-cache py3-pip",
-            "brew",    "brew install python3"
+            "brew",    "brew install python3",
+            "pacman",  "pacman -Sy --noconfirm python",
+            "zypper",  "zypper install -y python3"
         ));
     }
 
@@ -686,7 +704,7 @@ public class DeploymentService {
     }
 
     private String detectPackageManager(Machine machine) {
-        for (String pm : new String[]{"apt-get", "dnf", "yum", "apk", "brew"}) {
+        for (String pm : new String[]{"apt-get", "dnf", "yum", "apk", "brew", "pacman", "zypper"}) {
             if (commandExists(machine, pm)) return pm;
         }
         return "unknown";
