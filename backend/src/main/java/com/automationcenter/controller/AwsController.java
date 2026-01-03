@@ -88,4 +88,22 @@ public class AwsController {
             @AuthenticationPrincipal User user) {
         return ResponseEntity.ok(awsTopologyService.getTopology(user.getId(), accountId, region));
     }
+
+    @GetMapping("/traces")
+    public ResponseEntity<List<Map<String, Object>>> listTraces(
+            @PathVariable Long accountId,
+            @RequestParam(required = false) String region,
+            @RequestParam(defaultValue = "60") int minutes,
+            @AuthenticationPrincipal User user) {
+        return ResponseEntity.ok(awsService.listTraces(user.getId(), accountId, region, minutes));
+    }
+
+    @GetMapping("/traces/{traceId}")
+    public ResponseEntity<Map<String, Object>> getTrace(
+            @PathVariable Long accountId,
+            @PathVariable String traceId,
+            @RequestParam(required = false) String region,
+            @AuthenticationPrincipal User user) {
+        return ResponseEntity.ok(awsService.getTrace(user.getId(), accountId, traceId, region));
+    }
 }
