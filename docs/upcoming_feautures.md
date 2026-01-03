@@ -249,16 +249,56 @@
 
 ---
 
-## 11. Long-Term Vision
+## 11. Dashboard — Global Ops Center (Planned)
+
+Replace current dashboard with a unified global overview:
+
+* **World globe** (3D, black & white, spinning) as the primary visual — each region lights up with active resources
+* Click region → drill into services running in that region
+* Click service → full detail view (e.g. S3 → all buckets, EC2 → all instances)
+* **Machine telemetry tiles** — per-machine avg CPU, RAM usage, disk I/O
+* **Cloudflare status panel** — live Cloudflare service health (from Cloudflare status API)
+* **AWS global instability feed** — AWS service health dashboard integration
+* **Cloudflare instability feed** — Cloudflare incident tracker
+* **Averages bar** — avg CPU/RAM across all registered machines
+* **Graph panels** — time-series for deployments, failures, queue depth, SSH sessions
+
+---
+
+## 12. Telemetry Page (Planned)
+
+Dedicated observability page (separate from dashboard):
+
+* Per-machine metrics: CPU, RAM, disk, network (polled via SSH or agent)
+* Time-series charts (1h / 24h / 7d / 30d views)
+* Deployment correlation overlay (mark deploys on metric timelines)
+* AWS CloudWatch metric integration (EC2, ECS, Lambda)
+* Queue depth & worker metrics from RabbitMQ
+* Alert thresholds with notification via WebSocket push
+
+---
+
+## 13. AWS — Full Service Explorer (Planned)
+
+* **World globe entry point** — click region to see all services in that region
+* **Universal service filter** — list every AWS service present in an account, not just EC2/S3/ECS
+* Services to add: Lambda, RDS, DynamoDB, CloudFront, SQS, SNS, ElastiCache, API Gateway, ECR, Route53, IAM roles
+* Per-service detail views (e.g. RDS → instances + parameter groups, Lambda → function list + invocation metrics)
+* Region selector persisted in localStorage (already done)
+
+---
+
+## 14. Long-Term Vision
 
 Arise eventually becomes a unified **Infrastructure Workspace** combining:
 
 * SSH-native control plane
 * Deployment engine with workflow DAG
-* Runtime topology graph
+* Runtime topology graph + 3D globe entry point
 * Cloud integrations (AWS, GCP, Azure, Hetzner, DO)
 * Observability layer (metrics, traces, logs)
 * Workflow / process builder
 * Secrets management
+* Global ops center dashboard
 
 for local, cloud, and hybrid infrastructure.
