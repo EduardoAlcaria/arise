@@ -31,6 +31,14 @@ public class AwsAccountController {
         return ResponseEntity.ok(awsService.listAccounts(user.getId()));
     }
 
+    @PutMapping("/{id}")
+    public ResponseEntity<AwsAccountResponse> update(
+            @PathVariable Long id,
+            @RequestBody @Valid AwsAccountRequest req,
+            @AuthenticationPrincipal User user) {
+        return ResponseEntity.ok(awsService.updateAccount(user.getId(), id, req));
+    }
+
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> delete(
             @PathVariable Long id,

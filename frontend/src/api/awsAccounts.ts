@@ -24,5 +24,8 @@ export const listAwsAccounts = () =>
 export const createAwsAccount = (req: AwsAccountRequest) =>
   client.post<AwsAccountResponse>('/aws/accounts', req).then(r => r.data)
 
+export const updateAwsAccount = (id: number, req: AwsAccountRequest) =>
+  client.put<AwsAccountResponse>(`/aws/accounts/${id}`, req).then(r => r.data)
+
 export const deleteAwsAccount = (id: number) =>
   client.delete(`/aws/accounts/${id}`)
