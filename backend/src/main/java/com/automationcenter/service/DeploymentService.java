@@ -279,7 +279,11 @@ public class DeploymentService {
                 return;
             }
 
-            String baseDir = "/apps/" + deployment.getId();
+            // Resolve remote home dir first; fall back to /tmp if ssh fails
+            var homeResult = sshService.execute(machine, "echo $HOME");
+            String remoteHome = homeResult.getExitCode() == 0 && !homeResult.getStdout().isBlank()
+                    ? homeResult.getStdout().strip() : "/tmp";
+            String baseDir = remoteHome + "/arise-apps/" + deployment.getId();
             var mkdirResult = sshService.execute(machine, "mkdir -p " + baseDir);
             if (mkdirResult.getExitCode() != 0) {
                 appendLog(deployment, "Failed to create app dir: " + mkdirResult.getStderr(), LogLevel.ERROR);
