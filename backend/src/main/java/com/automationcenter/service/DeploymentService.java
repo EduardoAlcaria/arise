@@ -581,13 +581,16 @@ public class DeploymentService {
     }
 
     private boolean commandExists(Machine machine, String cmd) {
-        var r = sshService.execute(machine, "command -v " + cmd + " 2>/dev/null");
+        // Prepend Homebrew + common paths since ChannelExec skips shell profile
+        var r = sshService.execute(machine,
+            "PATH=/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:$PATH command -v " + cmd + " 2>/dev/null");
         return r.getExitCode() == 0 && !r.getStdout().isBlank();
     }
 
     private boolean dockerComposeAvailable(Machine machine) {
         if (commandExists(machine, "docker-compose")) return true;
-        var r = sshService.execute(machine, "docker compose version 2>/dev/null");
+        var r = sshService.execute(machine,
+            "PATH=/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:$PATH docker compose version 2>/dev/null");
         return r.getExitCode() == 0;
     }
 
