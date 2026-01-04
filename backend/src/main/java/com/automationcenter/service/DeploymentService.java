@@ -35,6 +35,7 @@ public class DeploymentService {
     private final DeploymentRepository deploymentRepository;
     private final UserRepository userRepository;
     private final MachineService machineService;
+    private final com.automationcenter.repository.MachineRepository machineRepository;
     private final SshService sshService;
     private final LogService logService;
     private final RabbitTemplate rabbitTemplate;
@@ -103,7 +104,9 @@ public class DeploymentService {
     public void executeAsync(Long deploymentId) {
         Deployment deployment = deploymentRepository.findById(deploymentId)
                 .orElseThrow(() -> new ResourceNotFoundException("Deployment not found: " + deploymentId));
-        Machine machine = deployment.getMachine();
+        // Reload machine from DB to avoid Hibernate LazyInitializationException in async thread
+        Machine machine = machineRepository.findById(deployment.getMachine().getId())
+                .orElseThrow(() -> new ResourceNotFoundException("Machine not found for deployment " + deploymentId));
         // Fetch owner's GitHub token eagerly to avoid LazyInitializationException in async thread
         String ownerGithubToken = userRepository.findById(deployment.getOwner().getId())
                 .map(User::getGithubToken).orElse(null);
@@ -584,6 +587,8 @@ public class DeploymentService {
         // Prepend Homebrew + common paths since ChannelExec skips shell profile
         var r = sshService.execute(machine,
             "PATH=/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:$PATH command -v " + cmd + " 2>/dev/null");
+        if (!r.getStderr().isBlank()) log.debug("commandExists({}) stderr: {}", cmd, r.getStderr());
+        if (r.getExitCode() < 0) log.warn("commandExists({}) SSH failed: {}", cmd, r.getStderr());
         return r.getExitCode() == 0 && !r.getStdout().isBlank();
     }
 
