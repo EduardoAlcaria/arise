@@ -144,7 +144,9 @@ public class SshService {
             session.connect(CONNECT_TIMEOUT_MS);
 
             ChannelExec channel = (ChannelExec) session.openChannel("exec");
-            channel.setCommand(command);
+            // ChannelExec skips shell profile — prepend Homebrew + common paths so macOS tools are found
+            String fullCommand = "export PATH=/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:$PATH; " + command;
+            channel.setCommand(fullCommand);
 
             ByteArrayOutputStream stdout = new ByteArrayOutputStream();
             ByteArrayOutputStream stderr = new ByteArrayOutputStream();
