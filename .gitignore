@@ -1,0 +1,40 @@
+# Build outputs
+target/
+build/
+dist/
+out/
+
+# Node
+node_modules/
+.npm
+
+# Java
+*.class
+*.jar
+*.war
+*.ear
+.mvn/wrapper/maven-wrapper.jar
+
+# Env & secrets
+.env
+.env.*
+*.pem
+*.key
+
+# IDE
+.idea/
+*.iml
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker volumes & logs
+*.log
+postgres_data/
+redis_data/
