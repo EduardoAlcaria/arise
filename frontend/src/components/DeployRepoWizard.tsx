@@ -17,7 +17,10 @@ interface RepoSel {
   branches: GitHubBranch[]
   loadingBranches: boolean
 }
-export interface DeployItem { repoUrl: string; branch: string; name: string; machineId: number }
+export interface DeployItem {
+  repoUrl: string; branch: string; name: string; machineId: number
+  tunnelName?: string; tunnelHostname?: string; tunnelAppPort?: number
+}
 export interface AppDeployPayload {
   name: string
   machineId: number
@@ -234,11 +237,15 @@ export default function DeployRepoWizard({
     setDeployError('')
     const envFile = buildEnvFileConfigItem()
     if (mode === 'single') {
+      const tunnelFields = tunnelEnabled && tunnelName.trim() && tunnelHostname.trim()
+        ? { tunnelName: tunnelName.trim(), tunnelHostname: tunnelHostname.trim(), tunnelAppPort }
+        : {}
       const items: DeployItem[] = Array.from(selections.values()).map(sel => ({
         repoUrl: sel.repo.url,
         branch: sel.branch,
         name: deployNames.get(sel.repo.fullName) || sel.repo.name,
         machineId,
+        ...tunnelFields,
       }))
       try { await onDeploy(items) } catch (e: any) { setDeployError(e.message || 'Deployment failed') }
     } else {
@@ -654,6 +661,51 @@ export default function DeployRepoWizard({
                   </div>
                 </div>
               )}
+
+              {/* Tunnel section (single mode) */}
+              <div>
+                <button
+                  type="button"
+                  onClick={() => setTunnelEnabled(v => !v)}
+                  className="w-full flex items-center justify-between px-3 py-2.5 border border-border rounded-lg text-xs font-medium transition-colors hover:bg-muted/40"
+                  style={{ background: tunnelEnabled ? 'var(--color-muted)' : 'transparent' }}
+                >
+                  <span className="flex items-center gap-2 text-foreground">
+                    <Cloud size={13} /> Cloudflare Tunnel
+                    <span className="text-muted-foreground font-normal">(optional)</span>
+                  </span>
+                  <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${tunnelEnabled ? 'bg-primary text-primary-foreground' : 'bg-muted-foreground/20 text-muted-foreground'}`}>
+                    {tunnelEnabled ? 'ON' : 'OFF'}
+                  </span>
+                </button>
+                {tunnelEnabled && !cloudflareConfigured && (
+                  <div className="mt-2 flex gap-2 items-start rounded-lg px-3 py-2.5 text-xs border border-amber-400/20 bg-amber-400/5 text-amber-400">
+                    <AlertTriangle size={12} className="shrink-0 mt-0.5" />
+                    <span>Cloudflare credentials not configured. Go to <strong>Settings → Cloudflare</strong> first.</span>
+                  </div>
+                )}
+                {tunnelEnabled && (
+                  <div className="mt-2 flex flex-col gap-2 border border-border rounded-lg p-3 bg-muted/10">
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-[10px] text-muted-foreground mb-1 uppercase tracking-wider">Tunnel name *</label>
+                        <input className="input-field mono" style={{ fontSize: '12px', paddingTop: '5px', paddingBottom: '5px' }}
+                          placeholder="my-app-tunnel" value={tunnelName} onChange={e => setTunnelName(e.target.value)} />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] text-muted-foreground mb-1 uppercase tracking-wider">App port</label>
+                        <input className="input-field mono" type="number" style={{ fontSize: '12px', paddingTop: '5px', paddingBottom: '5px' }}
+                          value={tunnelAppPort} onChange={e => setTunnelAppPort(Number(e.target.value))} />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] text-muted-foreground mb-1 uppercase tracking-wider">Public hostname *</label>
+                      <input className="input-field mono" style={{ fontSize: '12px', paddingTop: '5px', paddingBottom: '5px' }}
+                        placeholder="myapp.example.com" value={tunnelHostname} onChange={e => setTunnelHostname(e.target.value)} />
+                    </div>
+                  </div>
+                )}
+              </div>
 
               {deployError && (
                 <div className="flex gap-2 items-center rounded-lg px-3 py-2 mb-3 text-xs text-destructive border border-destructive/20 bg-destructive/5">
