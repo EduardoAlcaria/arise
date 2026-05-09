@@ -1,20 +1,284 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { getDeployments, createDeployment, rollbackDeployment, getDeploymentLogs } from '../api/deployments'
-import { getRepos } from '../api/github'
+import { createDeployment } from '../api/deployments'
+import { getRepos, getBranches, getRepoReadme, getRepoTree } from '../api/github'
 import { getMachines } from '../api/machines'
-import { Search, Rocket, FileText, RotateCcw, X, Link2Off } from 'lucide-react'
-import { GitHubIcon, StackIcon, StatusDot } from '../components/icons'
+import { Search, Star, GitBranch, Lock, Unlock, X, ChevronDown, ChevronRight, Rocket, Link2Off, FileText, Folder } from 'lucide-react'
+import { GitHubIcon } from '../components/icons'
 import DeployRepoWizard, { type DeployItem, type AppDeployPayload } from '../components/DeployRepoWizard'
 import DeploymentWatcher from '../components/DeploymentWatcher'
+import type { GitHubRepo, GitHubBranch } from '../types'
 
 interface GHUser { login: string; avatar_url: string }
 
-function statusCls(s: string) {
-  if (s === 'SUCCESS') return 'status-online'
-  if (s === 'FAILED') return 'status-error'
-  if (['BUILDING', 'DEPLOYING', 'PENDING'].includes(s)) return 'status-building'
-  return 'status-muted'
+const LANG_COLORS: Record<string, string> = {
+  TypeScript: '#3178C6', JavaScript: '#F7DF1E', Python: '#3572A5',
+  Java: '#B07219', Go: '#00ADD8', Rust: '#DEA584', 'C#': '#178600',
+  PHP: '#4F5D95', Ruby: '#701516', Kotlin: '#A97BFF', Swift: '#F05138',
+}
+
+function simpleMarkdown(md: string): string {
+  return md
+    .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+    .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+    .replace(/^# (.+)$/gm, '<h1>$1</h1>')
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\n/g, '<br/>')
+}
+
+function timeAgo(dateStr: string | null): string {
+  if (!dateStr) return '—'
+  const diff = Date.now() - new Date(dateStr).getTime()
+  const days = Math.floor(diff / 86400000)
+  if (days === 0) return 'today'
+  if (days === 1) return 'yesterday'
+  if (days < 30) return `${days}d ago`
+  const months = Math.floor(days / 30)
+  if (months < 12) return `${months}mo ago`
+  return `${Math.floor(months / 12)}y ago`
+}
+
+interface TreeNode {
+  path: string
+  type: string
+  size?: number
+  children?: TreeNode[]
+  name: string
+}
+
+function buildTree(items: Array<{path: string; type: string; size?: number}>): TreeNode[] {
+  const root: TreeNode[] = []
+  for (const item of items) {
+    const parts = item.path.split('/')
+    let current = root
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i]
+      const isLast = i === parts.length - 1
+      let existing = current.find(n => n.name === part)
+      if (!existing) {
+        existing = {
+          path: parts.slice(0, i + 1).join('/'),
+          type: isLast ? item.type : 'tree',
+          size: isLast ? item.size : undefined,
+          name: part,
+          children: isLast && item.type !== 'tree' ? undefined : [],
+        }
+        current.push(existing)
+      }
+      if (!isLast) {
+        current = existing.children ?? []
+      }
+    }
+  }
+  // Sort: folders first, then files
+  const sortNodes = (nodes: TreeNode[]): TreeNode[] => {
+    nodes.sort((a, b) => {
+      if (a.type === 'tree' && b.type !== 'tree') return -1
+      if (a.type !== 'tree' && b.type === 'tree') return 1
+      return a.name.localeCompare(b.name)
+    })
+    for (const node of nodes) {
+      if (node.children) sortNodes(node.children)
+    }
+    return nodes
+  }
+  return sortNodes(root)
+}
+
+function TreeItem({ node, depth = 0 }: { node: TreeNode; depth?: number }) {
+  const [open, setOpen] = useState(depth < 1)
+  const isDir = node.type === 'tree'
+  return (
+    <div>
+      <button
+        onClick={() => isDir && setOpen(v => !v)}
+        className={`w-full flex items-center gap-2 px-2 py-1 rounded text-left text-xs transition-colors ${isDir ? 'hover:bg-muted/40 cursor-pointer' : 'cursor-default text-muted-foreground'}`}
+        style={{ paddingLeft: `${8 + depth * 16}px` }}
+      >
+        {isDir ? (
+          <>
+            {open ? <ChevronDown size={12} className="shrink-0 text-muted-foreground" /> : <ChevronRight size={12} className="shrink-0 text-muted-foreground" />}
+            <Folder size={13} className="shrink-0 text-muted-foreground" />
+          </>
+        ) : (
+          <>
+            <span className="w-3 shrink-0" />
+            <FileText size={12} className="shrink-0 text-muted-foreground" />
+          </>
+        )}
+        <span className={isDir ? 'text-foreground font-medium' : 'text-muted-foreground'}>{node.name}</span>
+      </button>
+      {isDir && open && node.children && (
+        <div>
+          {node.children.map(child => (
+            <TreeItem key={child.path} node={child} depth={depth + 1} />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+interface RepoPanelProps {
+  repo: GitHubRepo
+  onClose: () => void
+  onDeploy: (repo: GitHubRepo, branch: string) => void
+}
+
+function RepoPanel({ repo, onClose, onDeploy }: RepoPanelProps) {
+  const [tab, setTab] = useState<'readme' | 'files'>('readme')
+  const [branch, setBranch] = useState(repo.defaultBranch)
+  const [branches, setBranches] = useState<GitHubBranch[]>([])
+
+  const [owner, repoName] = repo.fullName.split('/')
+
+  useEffect(() => {
+    getBranches(owner, repoName).then(b => setBranches(b)).catch(() => {})
+  }, [owner, repoName])
+
+  const { data: readmeData, isPending: readmePending } = useQuery({
+    queryKey: ['repo-readme', repo.fullName],
+    queryFn: () => getRepoReadme(owner, repoName),
+    retry: false,
+  })
+
+  const { data: treeData, isPending: treePending } = useQuery({
+    queryKey: ['repo-tree', repo.fullName, branch],
+    queryFn: () => getRepoTree(owner, repoName, branch),
+    enabled: tab === 'files',
+    retry: false,
+  })
+
+  const treeNodes = treeData ? buildTree(treeData.tree) : []
+  const langColor = repo.language ? (LANG_COLORS[repo.language] ?? '#888') : '#888'
+
+  return (
+    <>
+      {/* Backdrop for mobile */}
+      <div className="fixed inset-0 bg-black/40 z-30 md:hidden" onClick={onClose} />
+
+      <div className="fixed right-0 top-0 bottom-0 z-40 flex flex-col bg-card border-l border-border shadow-2xl animate-fade-up"
+        style={{ width: 'min(50vw, 640px)', minWidth: '320px' }}>
+        {/* Header */}
+        <div className="px-5 py-4 border-b border-border shrink-0">
+          <div className="flex items-start justify-between gap-3 mb-2">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h2 className="font-semibold text-foreground text-base truncate">{repo.name}</h2>
+                <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${repo.private ? 'bg-amber-400/10 text-amber-400' : 'bg-muted text-muted-foreground'}`}>
+                  {repo.private ? <><Lock size={9} className="inline mr-1" />Private</> : <><Unlock size={9} className="inline mr-1" />Public</>}
+                </span>
+              </div>
+              <p className="text-xs text-muted-foreground mt-0.5">{repo.fullName}</p>
+            </div>
+            <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors shrink-0 p-0.5">
+              <X size={18} />
+            </button>
+          </div>
+          <div className="flex items-center gap-3 text-xs text-muted-foreground">
+            {repo.language && (
+              <span className="flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full shrink-0" style={{ background: langColor }} />
+                {repo.language}
+              </span>
+            )}
+            <span className="flex items-center gap-1">
+              <Star size={11} />
+              {repo.stargazersCount}
+            </span>
+            <span className="flex items-center gap-1">
+              <GitBranch size={11} />
+              {repo.defaultBranch}
+            </span>
+          </div>
+        </div>
+
+        {/* Tabs */}
+        <div className="flex items-center gap-1 px-5 py-2 border-b border-border shrink-0">
+          {(['readme', 'files'] as const).map(t => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              className="px-3 py-1.5 rounded-md text-xs font-semibold transition-all capitalize"
+              style={{
+                background: tab === t ? 'var(--color-muted)' : 'transparent',
+                color: tab === t ? 'var(--color-foreground)' : 'var(--color-muted-foreground)',
+              }}
+            >
+              {t === 'readme' ? 'README' : 'Files'}
+            </button>
+          ))}
+        </div>
+
+        {/* Content */}
+        <div className="flex-1 overflow-y-auto px-5 py-4">
+          {tab === 'readme' && (
+            readmePending ? (
+              <div className="space-y-2 animate-pulse">
+                {[80, 60, 90, 50, 70].map((w, i) => (
+                  <div key={i} className="h-3 rounded bg-muted" style={{ width: `${w}%` }} />
+                ))}
+              </div>
+            ) : readmeData ? (
+              <div
+                className="prose prose-sm prose-invert text-sm text-foreground leading-relaxed"
+                style={{ maxWidth: '100%' }}
+                dangerouslySetInnerHTML={{ __html: simpleMarkdown(readmeData.content) }}
+              />
+            ) : (
+              <div className="flex flex-col items-center justify-center py-16 text-muted-foreground gap-2">
+                <FileText size={28} className="opacity-30" />
+                <p className="text-xs opacity-50">No README found</p>
+              </div>
+            )
+          )}
+
+          {tab === 'files' && (
+            treePending ? (
+              <div className="space-y-1 animate-pulse">
+                {Array.from({ length: 8 }).map((_, i) => (
+                  <div key={i} className="h-7 rounded bg-muted" style={{ width: `${60 + (i % 3) * 15}%`, marginLeft: `${(i % 2) * 16}px` }} />
+                ))}
+              </div>
+            ) : treeNodes.length ? (
+              <div className="font-mono text-[13px]">
+                {treeNodes.map(node => <TreeItem key={node.path} node={node} />)}
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-16 text-muted-foreground gap-2">
+                <Folder size={28} className="opacity-30" />
+                <p className="text-xs opacity-50">Empty repository</p>
+              </div>
+            )
+          )}
+        </div>
+
+        {/* Sticky deploy bar */}
+        <div className="px-5 py-3.5 border-t border-border flex items-center gap-3 shrink-0 bg-card">
+          <span className="text-xs text-muted-foreground shrink-0">Deploy branch:</span>
+          <select
+            className="input-field mono text-xs flex-1"
+            style={{ paddingTop: '5px', paddingBottom: '5px', height: '32px' }}
+            value={branch}
+            onChange={e => setBranch(e.target.value)}
+          >
+            {branches.length ? (
+              branches.map(b => <option key={b.name} value={b.name}>{b.name}</option>)
+            ) : (
+              <option value={repo.defaultBranch}>{repo.defaultBranch}</option>
+            )}
+          </select>
+          <button
+            onClick={() => onDeploy(repo, branch)}
+            className="flex items-center gap-2 px-4 py-1.5 bg-primary text-primary-foreground text-xs font-semibold rounded-lg hover:opacity-90 transition-all shrink-0"
+          >
+            <Rocket size={12} /> Deploy
+          </button>
+        </div>
+      </div>
+    </>
+  )
 }
 
 export default function GitHub() {
@@ -23,44 +287,34 @@ export default function GitHub() {
   })
   const [showWizard, setShowWizard] = useState(false)
   const [search, setSearch] = useState('')
-  const [logsModal, setLogsModal] = useState<{ id: number; name: string } | null>(null)
+  const [selectedRepo, setSelectedRepo] = useState<GitHubRepo | null>(null)
   const [watching, setWatching] = useState<{ id: number; name: string } | null>(null)
+  const [wizardInitialRepo, setWizardInitialRepo] = useState<{ repo: GitHubRepo; branch: string } | null>(null)
 
-  // Check if a GitHub token is saved in the backend DB
-  const { data: reposCheck, isError: noToken, isPending: checkingToken } = useQuery({
+  const { data: repos, isError: noToken, isPending: checkingToken } = useQuery({
     queryKey: ['github-repos'],
     queryFn: getRepos,
     retry: false,
     staleTime: 60_000,
   })
-  const isConnected = !noToken && !checkingToken && reposCheck !== undefined
+  const isConnected = !noToken && !checkingToken && repos !== undefined
 
   const qc = useQueryClient()
-
-  const { data: allDeps, isLoading } = useQuery({
-    queryKey: ['deployments-repo'],
-    queryFn: () => getDeployments(0, 100),
-  })
   const { data: machines } = useQuery({ queryKey: ['machines'], queryFn: getMachines })
-  const { data: logs } = useQuery({
-    queryKey: ['deployment-logs', logsModal?.id],
-    queryFn: () => getDeploymentLogs(logsModal!.id),
-    enabled: !!logsModal,
-  })
-
   const deployMut = useMutation({ mutationFn: createDeployment })
-  const rollbackMut = useMutation({
-    mutationFn: rollbackDeployment,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['deployments-repo'] }),
-  })
 
-  const repoDeploys = (allDeps?.content ?? []).filter(d => d.type === 'REPOSITORY')
-  const filtered = repoDeploys.filter(d =>
+  const filtered = (repos ?? []).filter(r =>
     !search ||
-    d.name.toLowerCase().includes(search.toLowerCase()) ||
-    (d.repositoryUrl ?? '').toLowerCase().includes(search.toLowerCase()) ||
-    (d.branch ?? '').toLowerCase().includes(search.toLowerCase())
+    r.name.toLowerCase().includes(search.toLowerCase()) ||
+    (r.description ?? '').toLowerCase().includes(search.toLowerCase()) ||
+    (r.language ?? '').toLowerCase().includes(search.toLowerCase())
   )
+
+  const handlePatValidated = (user: GHUser) => {
+    setGhUser(user)
+    localStorage.setItem('gh_user', JSON.stringify(user))
+    qc.invalidateQueries({ queryKey: ['github-repos'] })
+  }
 
   const handleDeploy = async (items: DeployItem[]) => {
     let first = null
@@ -77,6 +331,7 @@ export default function GitHub() {
     qc.invalidateQueries({ queryKey: ['deployments-repo'] })
     qc.invalidateQueries({ queryKey: ['deployments', 0] })
     setShowWizard(false)
+    setWizardInitialRepo(null)
     if (first) setWatching({ id: first.id, name: first.name })
   }
 
@@ -94,13 +349,14 @@ export default function GitHub() {
     qc.invalidateQueries({ queryKey: ['deployments-repo'] })
     qc.invalidateQueries({ queryKey: ['deployments', 0] })
     setShowWizard(false)
+    setWizardInitialRepo(null)
     setWatching({ id: dep.id, name: dep.name })
   }
 
-  const handlePatValidated = (user: GHUser) => {
-    setGhUser(user)
-    localStorage.setItem('gh_user', JSON.stringify(user))
-    qc.invalidateQueries({ queryKey: ['github-repos'] })
+  const openDeployForRepo = (repo: GitHubRepo, branch: string) => {
+    setSelectedRepo(null)
+    setWizardInitialRepo({ repo, branch })
+    setShowWizard(true)
   }
 
   return (
@@ -128,7 +384,7 @@ export default function GitHub() {
             </>
           )}
           <button
-            onClick={() => setShowWizard(true)}
+            onClick={() => { setWizardInitialRepo(null); setShowWizard(true) }}
             className="ml-auto text-xs text-muted-foreground hover:text-foreground transition-colors px-2.5 py-1 rounded-md hover:bg-muted font-medium"
           >
             Update token
@@ -140,93 +396,98 @@ export default function GitHub() {
             <Link2Off size={13} className="text-muted-foreground" />
           </div>
           <p className="text-sm text-muted-foreground">No GitHub token configured</p>
-          <button onClick={() => setShowWizard(true)}
+          <button onClick={() => { setWizardInitialRepo(null); setShowWizard(true) }}
             className="ml-auto text-xs font-semibold text-foreground underline underline-offset-2 hover:opacity-80 transition-opacity">
             Connect →
           </button>
         </div>
       )}
 
-      {/* Toolbar */}
-      <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-5">
-        <div className="relative flex-1">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <input className="input-field" placeholder="Search repository deployments…"
-            value={search} onChange={e => setSearch(e.target.value)} style={{ paddingLeft: '36px' }} />
-        </div>
-        <button onClick={() => setShowWizard(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground text-sm font-semibold rounded-lg hover:opacity-90 transition-all shrink-0">
-          <Rocket size={14} /> Deploy Repository
-        </button>
+      {/* Search bar */}
+      <div className="relative mb-5">
+        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+        <input
+          className="input-field"
+          placeholder="Search repositories…"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          style={{ paddingLeft: '36px' }}
+        />
       </div>
 
-      {/* Deployments table */}
-      {isLoading ? (
-        <div className="bg-card border border-border rounded-xl h-48 animate-pulse" />
-      ) : !filtered.length ? (
+      {/* Repo grid */}
+      {checkingToken ? (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="bg-card border border-border rounded-xl h-36 animate-pulse" />
+          ))}
+        </div>
+      ) : !isConnected ? (
+        <div className="flex flex-col items-center justify-center py-20 text-muted-foreground gap-3">
+          <GitHubIcon size={36} className="opacity-20" />
+          <p className="text-sm opacity-50">Connect your GitHub account to browse repositories.</p>
+        </div>
+      ) : filtered.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 text-muted-foreground gap-3">
           <GitHubIcon size={36} className="opacity-20" />
           <p className="text-sm opacity-50">
-            {repoDeploys.length ? 'No deployments match your search.' : 'No repository deployments yet.'}
+            {repos && repos.length > 0 ? 'No repositories match your search.' : 'No repositories found.'}
           </p>
         </div>
       ) : (
-        <div className="bg-card border border-border rounded-xl overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/40 border-b border-border">
-              <tr>
-                {['Repository', 'Branch', 'Stack', 'Machine', 'Status', 'Deployed', ''].map(h => (
-                  <th key={h} className="px-4 py-3 text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {filtered.map(d => (
-                <tr key={d.id} className="hover:bg-muted/20 transition-colors group">
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-2.5">
-                      <StackIcon stack={d.detectedStack} size={32} />
-                      <div>
-                        <p className="font-medium text-foreground">{d.name}</p>
-                        {d.repositoryUrl && (
-                          <p className="text-[11px] text-muted-foreground font-mono truncate max-w-[200px]">
-                            {d.repositoryUrl.replace('https://github.com/', '')}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-4 py-3 text-xs text-muted-foreground font-mono">{d.branch ?? '—'}</td>
-                  <td className="px-4 py-3 text-xs text-muted-foreground">{d.detectedStack ?? '—'}</td>
-                  <td className="px-4 py-3 text-xs text-muted-foreground">{d.machineName ?? '—'}</td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-1.5">
-                      <StatusDot status={d.status} />
-                      <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${statusCls(d.status)}`}>{d.status}</span>
-                    </div>
-                  </td>
-                  <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">
-                    {new Date(d.createdAt).toLocaleDateString()}
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button onClick={() => setLogsModal({ id: d.id, name: d.name })} title="View logs"
-                        className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors">
-                        <FileText size={13} />
-                      </button>
-                      {d.status === 'SUCCESS' && (
-                        <button onClick={() => rollbackMut.mutate(d.id)} title="Rollback"
-                          className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors">
-                          <RotateCcw size={13} />
-                        </button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {filtered.map(repo => {
+            const langColor = repo.language ? (LANG_COLORS[repo.language] ?? '#888') : null
+            return (
+              <button
+                key={repo.fullName}
+                onClick={() => setSelectedRepo(repo)}
+                className="bg-card border border-border rounded-xl p-4 text-left transition-all hover:border-border/80 card-hover flex flex-col gap-2.5"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <p className="font-semibold text-foreground text-sm truncate flex-1">{repo.name}</p>
+                  <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0 ${repo.private ? 'bg-amber-400/10 text-amber-400' : 'bg-muted text-muted-foreground'}`}>
+                    {repo.private ? 'Private' : 'Public'}
+                  </span>
+                </div>
+
+                {repo.description && (
+                  <p className="text-xs text-muted-foreground leading-relaxed line-clamp-2">{repo.description}</p>
+                )}
+
+                <div className="flex items-center gap-3 text-[11px] text-muted-foreground mt-auto pt-1 flex-wrap">
+                  {repo.language && langColor && (
+                    <span className="flex items-center gap-1.5">
+                      <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: langColor }} />
+                      {repo.language}
+                    </span>
+                  )}
+                  <span className="flex items-center gap-1">
+                    <Star size={11} />
+                    {repo.stargazersCount}
+                  </span>
+                  <span className="flex items-center gap-1 ml-auto">
+                    <GitBranch size={11} />
+                    {repo.defaultBranch}
+                  </span>
+                </div>
+
+                {repo.updatedAt && (
+                  <p className="text-[10px] text-muted-foreground/60">Updated {timeAgo(repo.updatedAt)}</p>
+                )}
+              </button>
+            )
+          })}
         </div>
+      )}
+
+      {/* Right panel */}
+      {selectedRepo && (
+        <RepoPanel
+          repo={selectedRepo}
+          onClose={() => setSelectedRepo(null)}
+          onDeploy={openDeployForRepo}
+        />
       )}
 
       {/* Deploy wizard */}
@@ -235,7 +496,8 @@ export default function GitHub() {
           isConnected={isConnected}
           initialUser={ghUser}
           machines={machines ?? []}
-          onCancel={() => setShowWizard(false)}
+          initialRepoForDeploy={wizardInitialRepo ?? undefined}
+          onCancel={() => { setShowWizard(false); setWizardInitialRepo(null) }}
           onDeploy={handleDeploy}
           onAppDeploy={handleAppDeploy}
           isDeploying={deployMut.isPending}
@@ -249,24 +511,6 @@ export default function GitHub() {
           deploymentName={watching.name}
           onClose={() => { setWatching(null); qc.invalidateQueries({ queryKey: ['deployments-repo'] }) }}
         />
-      )}
-
-      {/* Logs modal */}
-      {logsModal && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
-          <div className="bg-card border border-border rounded-2xl p-6 w-full max-w-2xl shadow-2xl animate-fade-up">
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h3 className="font-semibold text-foreground">Deployment Logs</h3>
-                <p className="text-xs text-muted-foreground mt-0.5">{logsModal.name}</p>
-              </div>
-              <button onClick={() => setLogsModal(null)} className="text-muted-foreground hover:text-foreground"><X size={18} /></button>
-            </div>
-            <div className="terminal max-h-80">
-              {logs?.map(l => `[${l.level}] ${l.message}`).join('\n') ?? 'Loading…'}
-            </div>
-          </div>
-        </div>
       )}
     </div>
   )
