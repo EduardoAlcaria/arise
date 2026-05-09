@@ -12,4 +12,7 @@ public class GitHubRepoResponse {
     private String url;
     private boolean isPrivate;
     private String defaultBranch;
+    private String language;
+    private int stargazersCount;
+    private String updatedAt;
 }
