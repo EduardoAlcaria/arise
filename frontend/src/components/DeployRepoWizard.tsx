@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { X, Eye, EyeOff, Search, GitBranch, Loader2, ChevronRight, ChevronLeft, Check, AlertTriangle, Lock, Rocket, Plus, Trash2, Layers, FolderOpen } from 'lucide-react'
-import { saveGitHubToken, getRepos, getBranches } from '../api/github'
+import { X, Eye, EyeOff, Search, GitBranch, Loader2, ChevronRight, ChevronLeft, Check, AlertTriangle, Lock, Rocket, Plus, Trash2, Layers, FolderOpen, KeyRound, Database } from 'lucide-react'
+import { saveGitHubToken, getRepos, getBranches, getRepoEnvVars } from '../api/github'
+import { getInfisicalStatus, getInfisicalSecrets } from '../api/infisical'
 import type { AppServiceItem, ConfigFileItem } from '../api/deployments'
 import type { GitHubRepo, GitHubBranch } from '../types'
 import type { Machine } from '../types'
@@ -35,10 +36,12 @@ interface Props {
   onAppDeploy: (payload: AppDeployPayload) => Promise<void>
   isDeploying: boolean
   onPatValidated: (user: GHUser) => void
+  initialRepoForDeploy?: { repo: GitHubRepo; branch: string }
 }
 
 export default function DeployRepoWizard({
   isConnected, initialUser = null, machines, onCancel, onDeploy, onAppDeploy, isDeploying, onPatValidated,
+  initialRepoForDeploy,
 }: Props) {
   const [step, setStep] = useState(isConnected ? 2 : 1)
   const [pat, setPat] = useState('')
@@ -64,8 +67,47 @@ export default function DeployRepoWizard({
   const [tunnelHostname, setTunnelHostname] = useState('')
   const [tunnelAppPort, setTunnelAppPort] = useState(80)
 
+  // Env vars state
+  const [envVarKeys, setEnvVarKeys] = useState<string[]>([])
+  const [envVars, setEnvVars] = useState<Record<string, string>>({})
+  const [loadingEnvVars, setLoadingEnvVars] = useState(false)
+  const [infisicalConnected, setInfisicalConnected] = useState(false)
+  const [infisicalModalOpen, setInfisicalModalOpen] = useState(false)
+  const [infisicalEnv, setInfisicalEnv] = useState('dev')
+  const [loadingInfisical, setLoadingInfisical] = useState(false)
+  const [infisicalError, setInfisicalError] = useState('')
+
   useEffect(() => {
     if (isConnected) loadReposFromBackend()
+    // Check infisical status
+    getInfisicalStatus().then(s => setInfisicalConnected(s.connected)).catch(() => {})
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Pre-populate with initialRepoForDeploy
+  useEffect(() => {
+    if (initialRepoForDeploy && isConnected) {
+      const { repo, branch } = initialRepoForDeploy
+      const sel: RepoSel = { repo, branch, subfolder: repo.name, branches: [], loadingBranches: true }
+      setSelections(new Map([[repo.fullName, sel]]))
+      const [owner, repoName] = repo.fullName.split('/')
+      getBranches(owner, repoName).then(branches => {
+        setSelections(prev => {
+          const next = new Map(prev)
+          const ex = next.get(repo.fullName)
+          if (ex) next.set(repo.fullName, { ...ex, branches, loadingBranches: false })
+          return next
+        })
+      }).catch(() => {
+        setSelections(prev => {
+          const next = new Map(prev)
+          const ex = next.get(repo.fullName)
+          if (ex) next.set(repo.fullName, { ...ex, loadingBranches: false })
+          return next
+        })
+      })
+      // Pre-load env vars for the initial repo
+      loadEnvVarsForRepo(owner, repoName, branch)
+    }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadReposFromBackend = async () => {
@@ -81,6 +123,25 @@ export default function DeployRepoWizard({
       const [owner] = repo.fullName.split('/')
       return await getBranches(owner, repo.name)
     } catch { return [] }
+  }
+
+  const loadEnvVarsForRepo = async (owner: string, repo: string, branch: string) => {
+    setLoadingEnvVars(true)
+    try {
+      const result = await getRepoEnvVars(owner, repo, branch)
+      setEnvVarKeys(result.vars ?? [])
+      setEnvVars(prev => {
+        const next: Record<string, string> = {}
+        for (const k of result.vars ?? []) {
+          next[k] = prev[k] ?? ''
+        }
+        return next
+      })
+    } catch {
+      setEnvVarKeys([])
+    } finally {
+      setLoadingEnvVars(false)
+    }
   }
 
   const validatePat = async () => {
@@ -107,6 +168,11 @@ export default function DeployRepoWizard({
       const next = new Map(prev)
       if (next.has(repo.fullName)) {
         next.delete(repo.fullName)
+        // Clear env vars if in single mode and no other selection
+        if (mode === 'single') {
+          setEnvVarKeys([])
+          setEnvVars({})
+        }
       } else {
         next.set(repo.fullName, {
           repo, branch: repo.defaultBranch, subfolder: repo.name,
@@ -120,9 +186,28 @@ export default function DeployRepoWizard({
             return n
           })
         })
+        // Load env vars for single mode
+        if (mode === 'single') {
+          const [owner] = repo.fullName.split('/')
+          loadEnvVarsForRepo(owner, repo.name, repo.defaultBranch)
+        }
       }
       return next
     })
+  }
+
+  const handleBranchChange = (repoFullName: string, branch: string) => {
+    setSelections(prev => {
+      const next = new Map(prev)
+      const ex = next.get(repoFullName)
+      if (ex) next.set(repoFullName, { ...ex, branch })
+      return next
+    })
+    // Reload env vars on branch change (single mode)
+    if (mode === 'single') {
+      const parts = repoFullName.split('/')
+      loadEnvVarsForRepo(parts[0], parts[1], branch)
+    }
   }
 
   const proceedToStep3 = () => {
@@ -136,9 +221,16 @@ export default function DeployRepoWizard({
     setStep(3)
   }
 
+  const buildEnvFileConfigItem = (): ConfigFileItem | null => {
+    if (envVarKeys.length === 0) return null
+    const lines = envVarKeys.map(k => `${k}=${envVars[k] ?? ''}`).join('\n')
+    return { path: '.env', content: lines }
+  }
+
   const handleDeploy = async () => {
     if (!machineId) { setDeployError('Please select a machine'); return }
     setDeployError('')
+    const envFile = buildEnvFileConfigItem()
     if (mode === 'single') {
       const items: DeployItem[] = Array.from(selections.values()).map(sel => ({
         repoUrl: sel.repo.url,
@@ -149,6 +241,7 @@ export default function DeployRepoWizard({
       try { await onDeploy(items) } catch (e: any) { setDeployError(e.message || 'Deployment failed') }
     } else {
       if (!appName.trim()) { setDeployError('Please enter an application name'); return }
+      const allConfigFiles = envFile ? [...configFiles, envFile] : configFiles
       const payload: AppDeployPayload = {
         name: appName.trim(),
         machineId,
@@ -157,7 +250,7 @@ export default function DeployRepoWizard({
           repoUrl: sel.repo.url,
           branch: sel.branch,
         })),
-        configFiles,
+        configFiles: allConfigFiles,
         ...(tunnelEnabled && tunnelName.trim() && tunnelHostname.trim() && {
           tunnelName: tunnelName.trim(),
           tunnelHostname: tunnelHostname.trim(),
@@ -190,6 +283,28 @@ export default function DeployRepoWizard({
     }
     setConfigFiles(prev => [...prev, ...added])
     if (folderInputRef.current) folderInputRef.current.value = ''
+  }
+
+  const handleLoadFromInfisical = async () => {
+    setLoadingInfisical(true)
+    setInfisicalError('')
+    try {
+      const secrets = await getInfisicalSecrets(infisicalEnv)
+      setEnvVars(prev => {
+        const next = { ...prev }
+        for (const s of secrets) {
+          if (envVarKeys.includes(s.secretName)) {
+            next[s.secretName] = s.secretValue
+          }
+        }
+        return next
+      })
+      setInfisicalModalOpen(false)
+    } catch (e: any) {
+      setInfisicalError(e.message || 'Failed to load secrets')
+    } finally {
+      setLoadingInfisical(false)
+    }
   }
 
   const filteredRepos = repos.filter(r => r.fullName.toLowerCase().includes(repoSearch.toLowerCase()))
@@ -395,12 +510,7 @@ export default function DeployRepoWizard({
                                   className="input-field mono text-xs flex-1"
                                   style={{ paddingTop: '4px', paddingBottom: '4px', height: '28px' }}
                                   value={sel.branch}
-                                  onChange={e => setSelections(prev => {
-                                    const next = new Map(prev)
-                                    const ex = next.get(repo.fullName)
-                                    if (ex) next.set(repo.fullName, { ...ex, branch: e.target.value })
-                                    return next
-                                  })}
+                                  onChange={e => handleBranchChange(repo.fullName, e.target.value)}
                                 >
                                   {sel.branches.map(b => <option key={b.name} value={b.name}>{b.name}</option>)}
                                   {sel.branches.length === 0 && <option value={sel.branch}>{sel.branch}</option>}
@@ -432,10 +542,52 @@ export default function DeployRepoWizard({
                   })}
                 </div>
               )}
+
+              {/* Env vars section (single mode, when vars detected) */}
+              {mode === 'single' && (
+                loadingEnvVars ? (
+                  <div className="mt-4 flex items-center gap-2 text-xs text-muted-foreground">
+                    <Loader2 size={12} className="animate-spin" /> Detecting environment variables…
+                  </div>
+                ) : envVarKeys.length > 0 ? (
+                  <div className="mt-4 border border-border rounded-lg p-3 bg-muted/10">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2">
+                        <KeyRound size={13} className="text-muted-foreground" />
+                        <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+                          Environment Variables ({envVarKeys.length})
+                        </span>
+                      </div>
+                      {infisicalConnected && (
+                        <button
+                          onClick={() => setInfisicalModalOpen(true)}
+                          className="flex items-center gap-1.5 text-[11px] text-primary hover:opacity-80 transition-opacity font-semibold"
+                        >
+                          <Database size={11} /> Load from Infisical
+                        </button>
+                      )}
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      {envVarKeys.map(key => (
+                        <div key={key} className="flex items-center gap-2">
+                          <code className="text-[11px] font-mono text-muted-foreground w-2/5 truncate shrink-0">{key}</code>
+                          <input
+                            className="input-field mono text-xs flex-1"
+                            style={{ paddingTop: '4px', paddingBottom: '4px', height: '28px' }}
+                            placeholder={`value for ${key}`}
+                            value={envVars[key] ?? ''}
+                            onChange={e => setEnvVars(prev => ({ ...prev, [key]: e.target.value }))}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : null
+              )}
             </div>
           )}
 
-          {/* ── Step 3: Configure + Deploy ── */}
+          {/* ── Step 3: Configure + Deploy (single mode) ── */}
           {step === 3 && mode === 'single' && (
             <div>
               <div className="mb-4">
@@ -470,6 +622,7 @@ export default function DeployRepoWizard({
                   ))}
                 </div>
               </div>
+
               <div className="mb-3.5">
                 <label className="block text-[11px] font-semibold text-muted-foreground mb-1.5 uppercase tracking-widest">Machine *</label>
                 <select className="input-field" value={machineId || ''} onChange={e => setMachineId(Number(e.target.value))}>
@@ -477,6 +630,29 @@ export default function DeployRepoWizard({
                   {machines.map(m => <option key={m.id} value={m.id}>{m.name} ({m.host})</option>)}
                 </select>
               </div>
+
+              {/* Env vars summary */}
+              {envVarKeys.length > 0 && (
+                <div className="mb-3.5 border border-border rounded-lg p-3 bg-muted/10">
+                  <div className="flex items-center gap-2 mb-2">
+                    <KeyRound size={12} className="text-muted-foreground" />
+                    <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+                      .env file ({envVarKeys.length} vars)
+                    </span>
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    {envVarKeys.map(key => (
+                      <div key={key} className="flex items-center gap-2">
+                        <code className="text-[11px] font-mono text-muted-foreground w-2/5 truncate shrink-0">{key}</code>
+                        <code className="text-[11px] font-mono text-foreground truncate flex-1">
+                          {envVars[key] ? '••••••' : <span className="text-muted-foreground/50">(empty)</span>}
+                        </code>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {deployError && (
                 <div className="flex gap-2 items-center rounded-lg px-3 py-2 mb-3 text-xs text-destructive border border-destructive/20 bg-destructive/5">
                   <AlertTriangle size={12} className="shrink-0" />{deployError}
@@ -673,6 +849,48 @@ export default function DeployRepoWizard({
           )}
         </div>
       </div>
+
+      {/* Infisical load modal */}
+      {infisicalModalOpen && (
+        <div onClick={e => e.stopPropagation()} className="fixed inset-0 bg-black/70 flex items-center justify-center z-[60] p-4">
+          <div className="bg-card border border-border rounded-2xl p-5 w-full max-w-sm shadow-2xl animate-fade-up">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <Database size={16} className="text-muted-foreground" />
+                <h3 className="font-semibold text-foreground text-sm">Load from Infisical</h3>
+              </div>
+              <button onClick={() => setInfisicalModalOpen(false)} className="text-muted-foreground hover:text-foreground">
+                <X size={16} />
+              </button>
+            </div>
+            <label className="block text-[11px] font-semibold text-muted-foreground mb-1.5 uppercase tracking-widest">Environment</label>
+            <input
+              className="input-field mb-4"
+              placeholder="dev, staging, prod…"
+              value={infisicalEnv}
+              onChange={e => setInfisicalEnv(e.target.value)}
+            />
+            {infisicalError && (
+              <div className="flex gap-2 items-center rounded-lg px-3 py-2 mb-3 text-xs text-destructive border border-destructive/20 bg-destructive/5">
+                <AlertTriangle size={12} className="shrink-0" />{infisicalError}
+              </div>
+            )}
+            <p className="text-xs text-muted-foreground mb-4 leading-relaxed">
+              Secrets from Infisical matching your detected variable names will be auto-filled. You can override them manually after.
+            </p>
+            <div className="flex gap-2">
+              <button onClick={() => setInfisicalModalOpen(false)}
+                className="flex-1 py-2 border border-border text-foreground text-sm rounded-lg hover:bg-muted transition-colors">
+                Cancel
+              </button>
+              <button onClick={handleLoadFromInfisical} disabled={loadingInfisical || !infisicalEnv.trim()}
+                className="flex-1 flex items-center justify-center gap-2 py-2 bg-primary text-primary-foreground text-sm font-semibold rounded-lg hover:opacity-90 disabled:opacity-50 transition-all">
+                {loadingInfisical ? <><Loader2 size={13} className="animate-spin" />Loading…</> : <>Load secrets</>}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
