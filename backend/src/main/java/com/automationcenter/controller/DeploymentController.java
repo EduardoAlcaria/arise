@@ -2,6 +2,7 @@ package com.automationcenter.controller;
 
 import com.automationcenter.dto.deployment.DeploymentRequest;
 import com.automationcenter.dto.deployment.DeploymentResponse;
+import com.automationcenter.dto.deployment.TunnelRequest;
 import com.automationcenter.entity.LogEntry;
 import com.automationcenter.entity.User;
 import com.automationcenter.service.DeploymentService;
@@ -55,6 +56,15 @@ public class DeploymentController {
             @PathVariable Long id,
             @AuthenticationPrincipal User user) {
         return ResponseEntity.ok(deploymentService.rollback(id, user.getId()));
+    }
+
+    @PostMapping("/{id}/tunnel")
+    public ResponseEntity<DeploymentResponse> addTunnel(
+            @PathVariable Long id,
+            @RequestBody @Valid TunnelRequest request,
+            @AuthenticationPrincipal User user) {
+        return ResponseEntity.ok(deploymentService.addTunnel(
+                id, user.getId(), request.getTunnelName(), request.getTunnelHostname(), request.getTunnelAppPort()));
     }
 
     @GetMapping(value = "/{id}/logs/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
