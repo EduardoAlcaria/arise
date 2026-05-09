@@ -1,10 +1,10 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { getDeployments, createDeployment, rollbackDeployment, getDeploymentLogs } from '../api/deployments'
+import { getDeployments, createDeployment, rollbackDeployment, getDeploymentLogs, addDeploymentTunnel } from '../api/deployments'
 import type { Deployment } from '../types'
 import { getMachines } from '../api/machines'
 import { getGitHubUser, type GHUser } from '../api/github'
-import { Plus, RotateCcw, FileText, X, Search, Rocket, ChevronDown, ChevronRight, Radio } from 'lucide-react'
+import { Plus, RotateCcw, FileText, X, Search, Rocket, ChevronDown, ChevronRight, Radio, Cloud, ExternalLink, AlertTriangle, Loader2 } from 'lucide-react'
 import { StackIcon, StatusDot } from '../components/icons'
 import DeployRepoWizard, { type DeployItem, type AppDeployPayload } from '../components/DeployRepoWizard'
 import DeploymentWatcher from '../components/DeploymentWatcher'
@@ -61,7 +61,6 @@ function groupDeployments(deployments: Deployment[]): RepoGroup[] {
       latest: runs[0],
     })
   }
-  // Sort groups by latest run date
   groups.sort((a, b) => new Date(b.latest.createdAt).getTime() - new Date(a.latest.createdAt).getTime())
   return groups
 }
@@ -78,6 +77,11 @@ function branchesForGroup(runs: Deployment[]): string[] {
   return branches
 }
 
+interface TunnelModalState {
+  deploymentId: number
+  deploymentName: string
+}
+
 export default function Deployments() {
   const qc = useQueryClient()
   const [showWizard, setShowWizard] = useState(false)
@@ -88,6 +92,13 @@ export default function Deployments() {
   const [ghChecked, setGhChecked] = useState(false)
   const [watching, setWatching] = useState<{ id: number; name: string } | null>(null)
   const [expandedKey, setExpandedKey] = useState<string | null>(null)
+
+  // Tunnel modal state
+  const [tunnelModal, setTunnelModal] = useState<TunnelModalState | null>(null)
+  const [tunnelName, setTunnelName] = useState('')
+  const [tunnelHostname, setTunnelHostname] = useState('')
+  const [tunnelAppPort, setTunnelAppPort] = useState(80)
+  const [tunnelError, setTunnelError] = useState('')
 
   const { data, isLoading } = useQuery({
     queryKey: ['deployments-all'],
@@ -103,6 +114,20 @@ export default function Deployments() {
   const rollbackMut = useMutation({
     mutationFn: rollbackDeployment,
     onSuccess: () => qc.invalidateQueries({ queryKey: ['deployments-all'] }),
+  })
+
+  const tunnelMut = useMutation({
+    mutationFn: ({ id, name, hostname, port }: { id: number; name: string; hostname: string; port: number }) =>
+      addDeploymentTunnel(id, name, hostname, port),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['deployments-all'] })
+      setTunnelModal(null)
+      setTunnelName('')
+      setTunnelHostname('')
+      setTunnelAppPort(80)
+      setTunnelError('')
+    },
+    onError: (e: any) => setTunnelError(e?.response?.data?.message ?? e?.message ?? 'Tunnel creation failed'),
   })
 
   const openWizard = async () => {
@@ -121,6 +146,7 @@ export default function Deployments() {
         const dep = await createDeployment({
           name: item.name, type: 'REPOSITORY',
           repositoryUrl: item.repoUrl, branch: item.branch, machineId: item.machineId,
+          tunnelName: item.tunnelName, tunnelHostname: item.tunnelHostname, tunnelAppPort: item.tunnelAppPort,
         })
         if (!first) first = dep
       }
@@ -142,6 +168,24 @@ export default function Deployments() {
       setShowWizard(false)
       setWatching({ id: dep.id, name: dep.name })
     } finally { setIsDeploying(false) }
+  }
+
+  const openTunnelModal = (deployment: Deployment, e: React.MouseEvent) => {
+    e.stopPropagation()
+    setTunnelError('')
+    setTunnelName(deployment.name + '-tunnel')
+    setTunnelHostname('')
+    setTunnelAppPort(80)
+    setTunnelModal({ deploymentId: deployment.id, deploymentName: deployment.name })
+  }
+
+  const submitTunnel = () => {
+    if (!tunnelModal) return
+    if (!tunnelName.trim() || !tunnelHostname.trim()) {
+      setTunnelError('Tunnel name and hostname are required')
+      return
+    }
+    tunnelMut.mutate({ id: tunnelModal.deploymentId, name: tunnelName.trim(), hostname: tunnelHostname.trim(), port: tunnelAppPort })
   }
 
   const allGroups = groupDeployments(data?.content ?? [])
@@ -176,9 +220,10 @@ export default function Deployments() {
           {filteredGroups.map(group => {
             const isExpanded = expandedKey === group.key
             const branches = branchesForGroup(group.runs)
+            const hasTunnel = !!group.latest.cloudfareTunnelUrl
             return (
               <div key={group.key} className="bg-card border border-border rounded-xl overflow-hidden transition-all">
-                {/* Card header — clickable to expand */}
+                {/* Card header */}
                 <button
                   onClick={() => setExpandedKey(isExpanded ? null : group.key)}
                   className="w-full flex items-center gap-4 px-5 py-4 hover:bg-muted/20 transition-colors text-left"
@@ -188,6 +233,9 @@ export default function Deployments() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <p className="font-semibold text-foreground text-sm">{group.name}</p>
+                      {group.latest.type === 'APPLICATION' && (
+                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-primary/10 text-primary">APP</span>
+                      )}
                       {branches.slice(0, 3).map(b => (
                         <span key={b} className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
                           {b}
@@ -202,9 +250,33 @@ export default function Deployments() {
                         {group.latest.repositoryUrl.replace('https://github.com/', '')}
                       </p>
                     )}
+                    {hasTunnel && (
+                      <a
+                        href={group.latest.cloudfareTunnelUrl!}
+                        target="_blank"
+                        rel="noreferrer"
+                        onClick={e => e.stopPropagation()}
+                        className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline mt-0.5"
+                      >
+                        <Cloud size={10} />
+                        {group.latest.cloudfareTunnelUrl}
+                        <ExternalLink size={9} />
+                      </a>
+                    )}
                   </div>
 
-                  <div className="flex items-center gap-4 shrink-0">
+                  <div className="flex items-center gap-3 shrink-0">
+                    {/* Tunnel button for any successful deployment without tunnel */}
+                    {group.latest.status === 'SUCCESS' && !hasTunnel && (
+                      <button
+                        onClick={e => openTunnelModal(group.latest, e)}
+                        title="Create Cloudflare tunnel"
+                        className="flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-lg border border-border hover:border-primary hover:text-primary text-muted-foreground transition-colors"
+                      >
+                        <Cloud size={12} /> Add Tunnel
+                      </button>
+                    )}
+
                     <div className="text-right hidden sm:block">
                       <div className="flex items-center gap-1.5 justify-end">
                         <StatusDot status={group.latest.status} />
@@ -248,10 +320,16 @@ export default function Deployments() {
                                 {run.branch}
                               </span>
                             )}
-                            {run.version && (
-                              <span className="text-[11px] font-mono text-muted-foreground/60 hidden sm:block truncate">
-                                {run.version.slice(0, 8)}
-                              </span>
+                            {run.cloudfareTunnelUrl && (
+                              <a
+                                href={run.cloudfareTunnelUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                onClick={e => e.stopPropagation()}
+                                className="flex items-center gap-1 text-[11px] text-primary hover:underline shrink-0"
+                              >
+                                <Cloud size={10} />{run.tunnelHostname ?? run.cloudfareTunnelUrl}
+                              </a>
                             )}
                           </div>
                           <div className="text-right shrink-0 hidden sm:block">
@@ -265,7 +343,7 @@ export default function Deployments() {
                               <button
                                 onClick={() => setWatching({ id: run.id, name: run.name })}
                                 title="Watch live"
-                                className="p-1.5 rounded hover:bg-muted text-primary hover:text-primary transition-colors"
+                                className="p-1.5 rounded hover:bg-muted text-primary transition-colors"
                               >
                                 <Radio size={13} />
                               </button>
@@ -276,6 +354,15 @@ export default function Deployments() {
                                 className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
                               >
                                 <FileText size={13} />
+                              </button>
+                            )}
+                            {run.status === 'SUCCESS' && !run.cloudfareTunnelUrl && (
+                              <button
+                                onClick={e => openTunnelModal(run, e)}
+                                title="Create tunnel"
+                                className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-primary transition-colors"
+                              >
+                                <Cloud size={13} />
                               </button>
                             )}
                             {run.status === 'SUCCESS' && (
@@ -318,6 +405,90 @@ export default function Deployments() {
           deploymentName={watching.name}
           onClose={() => { setWatching(null); qc.invalidateQueries({ queryKey: ['deployments-all'] }) }}
         />
+      )}
+
+      {/* Tunnel creation modal */}
+      {tunnelModal && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+          <div className="bg-card border border-border rounded-2xl p-6 w-full max-w-md shadow-2xl animate-fade-up">
+            <div className="flex items-center justify-between mb-5">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-muted flex items-center justify-center">
+                  <Cloud size={15} className="text-foreground" />
+                </div>
+                <div>
+                  <h3 className="font-semibold text-foreground text-sm">Create Cloudflare Tunnel</h3>
+                  <p className="text-[11px] text-muted-foreground">{tunnelModal.deploymentName}</p>
+                </div>
+              </div>
+              <button onClick={() => setTunnelModal(null)} className="text-muted-foreground hover:text-foreground transition-colors">
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="flex flex-col gap-4">
+              <div>
+                <label className="block text-[11px] font-semibold text-muted-foreground mb-1.5 uppercase tracking-widest">Tunnel Name *</label>
+                <input
+                  className="input-field"
+                  placeholder="my-app-tunnel"
+                  value={tunnelName}
+                  onChange={e => setTunnelName(e.target.value)}
+                  autoFocus
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-muted-foreground mb-1.5 uppercase tracking-widest">Public Hostname *</label>
+                <input
+                  className="input-field mono"
+                  placeholder="myapp.yourdomain.com"
+                  value={tunnelHostname}
+                  onChange={e => setTunnelHostname(e.target.value)}
+                />
+                <p className="text-[11px] text-muted-foreground mt-1">Must be on a Cloudflare-managed domain. A CNAME record will be created automatically.</p>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-muted-foreground mb-1.5 uppercase tracking-widest">App Port</label>
+                <input
+                  className="input-field mono"
+                  type="number"
+                  value={tunnelAppPort}
+                  onChange={e => setTunnelAppPort(Number(e.target.value))}
+                  min={1}
+                  max={65535}
+                />
+                <p className="text-[11px] text-muted-foreground mt-1">The port your application listens on inside the machine.</p>
+              </div>
+
+              {tunnelError && (
+                <div className="flex gap-2 items-start rounded-lg px-3 py-2.5 text-xs text-destructive border border-destructive/20 bg-destructive/5">
+                  <AlertTriangle size={12} className="shrink-0 mt-0.5" />{tunnelError}
+                </div>
+              )}
+
+              <div className="flex gap-2 pt-1">
+                <button
+                  onClick={() => setTunnelModal(null)}
+                  className="flex-1 py-2 border border-border text-foreground text-sm rounded-lg hover:bg-muted transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={submitTunnel}
+                  disabled={tunnelMut.isPending || !tunnelName.trim() || !tunnelHostname.trim()}
+                  className="flex-1 flex items-center justify-center gap-2 py-2 bg-primary text-primary-foreground text-sm font-semibold rounded-lg hover:opacity-90 disabled:opacity-50 transition-all"
+                >
+                  {tunnelMut.isPending
+                    ? <><Loader2 size={13} className="animate-spin" />Creating…</>
+                    : <><Cloud size={13} />Create Tunnel</>
+                  }
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
       {logsModal && (
