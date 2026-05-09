@@ -325,6 +325,9 @@ export default function GitHub() {
         repositoryUrl: item.repoUrl,
         branch: item.branch,
         machineId: item.machineId,
+        tunnelName: item.tunnelName,
+        tunnelHostname: item.tunnelHostname,
+        tunnelAppPort: item.tunnelAppPort,
       })
       if (!first) first = dep
     }
