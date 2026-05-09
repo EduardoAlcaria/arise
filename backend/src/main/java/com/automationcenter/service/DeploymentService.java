@@ -100,6 +100,8 @@ public class DeploymentService {
                     || osCheck.getExitCode() != 0;
             appendLog(deployment, "Target OS: " + (isWindows ? "Windows" : osCheck.getStdout().trim()), LogLevel.INFO);
 
+            fixDockerCredentials(deployment, machine, isWindows);
+
             String repoDir = isWindows
                     ? "%TEMP%\\deploy_" + deploymentId
                     : "/tmp/deploy_" + deploymentId;
@@ -175,6 +177,8 @@ public class DeploymentService {
             List<ConfigFileDto> configFiles = deployment.getApplicationConfigs() != null
                     ? objectMapper.readValue(deployment.getApplicationConfigs(), new TypeReference<>() {})
                     : List.of();
+
+            fixDockerCredentials(deployment, machine, false);
 
             String baseDir = "/apps/" + deployment.getId();
             var mkdirResult = sshService.execute(machine.getHost(), machine.getPort(),
@@ -349,6 +353,24 @@ public class DeploymentService {
             case "python" -> cd + "pip install -r requirements.txt";
             default -> "";
         };
+    }
+
+    private void fixDockerCredentials(Deployment deployment, Machine machine, boolean isWindows) {
+        try {
+            String cmd = isWindows
+                    ? "powershell -NoProfile -NonInteractive -Command " +
+                      "\"$f=[IO.Path]::Combine($env:USERPROFILE,'.docker','config.json');" +
+                      "if(Test-Path $f){$c=Get-Content $f -Raw|ConvertFrom-Json;" +
+                      "if($c.PSObject.Properties['credsStore']){$c.PSObject.Properties.Remove('credsStore');" +
+                      "$c|ConvertTo-Json -Depth 10|Set-Content $f -Encoding UTF8}}\""
+                    : "python3 -c 'import json,os; p=os.path.join(os.path.expanduser(\"~\"),\".docker\",\"config.json\"); " +
+                      "d=json.load(open(p)) if os.path.exists(p) else {}; " +
+                      "d.pop(\"credsStore\",None); open(p,\"w\").write(json.dumps(d,indent=2))' 2>/dev/null; true";
+            sshService.execute(machine.getHost(), machine.getPort(), machine.getSshUser(), machine.getPrivateKey(), cmd);
+            appendLog(deployment, "Docker credential store configured", LogLevel.INFO);
+        } catch (Exception e) {
+            log.debug("Docker credentials pre-flight skipped: {}", e.getMessage());
+        }
     }
 
     public DeploymentResponse toResponse(Deployment d) {
