@@ -4,7 +4,7 @@ import { getDeployments, createDeployment, rollbackDeployment, getDeploymentLogs
 import type { Deployment } from '../types'
 import { getMachines } from '../api/machines'
 import { getGitHubUser, type GHUser } from '../api/github'
-import { Plus, RotateCcw, FileText, X, Search, Rocket, ChevronDown, ChevronRight } from 'lucide-react'
+import { Plus, RotateCcw, FileText, X, Search, Rocket, ChevronDown, ChevronRight, Radio } from 'lucide-react'
 import { StackIcon, StatusDot } from '../components/icons'
 import DeployRepoWizard, { type DeployItem, type AppDeployPayload } from '../components/DeployRepoWizard'
 import DeploymentWatcher from '../components/DeploymentWatcher'
@@ -261,13 +261,23 @@ export default function Deployments() {
                             <p className="text-[10px] text-muted-foreground/60">{timeAgo(run.createdAt)}</p>
                           </div>
                           <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-                            <button
-                              onClick={() => setLogsModal({ id: run.id, name: run.name })}
-                              title="View logs"
-                              className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-                            >
-                              <FileText size={13} />
-                            </button>
+                            {['BUILDING', 'DEPLOYING', 'PENDING'].includes(run.status) ? (
+                              <button
+                                onClick={() => setWatching({ id: run.id, name: run.name })}
+                                title="Watch live"
+                                className="p-1.5 rounded hover:bg-muted text-primary hover:text-primary transition-colors"
+                              >
+                                <Radio size={13} />
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => setLogsModal({ id: run.id, name: run.name })}
+                                title="View logs"
+                                className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                              >
+                                <FileText size={13} />
+                              </button>
+                            )}
                             {run.status === 'SUCCESS' && (
                               <button
                                 onClick={() => rollbackMut.mutate(run.id)}
