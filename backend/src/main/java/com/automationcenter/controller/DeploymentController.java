@@ -57,14 +57,6 @@ public class DeploymentController {
         return ResponseEntity.ok(deploymentService.rollback(id, user.getId()));
     }
 
-    @GetMapping("/{id}/logs")
-    public ResponseEntity<List<LogEntry>> getLogs(
-            @PathVariable Long id,
-            @AuthenticationPrincipal User user) {
-        deploymentService.findRawById(id, user.getId()); // ownership check
-        return ResponseEntity.ok(logService.findByDeploymentId(id));
-    }
-
     @GetMapping(value = "/{id}/logs/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter streamLogs(@PathVariable Long id, @AuthenticationPrincipal User user) {
         SseEmitter emitter = new SseEmitter(300_000L);
