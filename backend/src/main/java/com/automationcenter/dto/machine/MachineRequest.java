@@ -18,4 +18,5 @@ public class MachineRequest {
     private String sshUser;
     @NotBlank
     private String privateKey;
+    private String proxyCommand; // optional — null means direct TCP connection
 }

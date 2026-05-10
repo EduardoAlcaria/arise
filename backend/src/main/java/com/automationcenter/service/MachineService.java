@@ -35,6 +35,7 @@ public class MachineService {
                 .port(request.getPort())
                 .sshUser(request.getSshUser())
                 .privateKey(request.getPrivateKey())
+                .proxyCommand(request.getProxyCommand())
                 .owner(owner)
                 .build();
         return toResponse(machineRepository.save(machine));
@@ -57,6 +58,10 @@ public class MachineService {
         if (request.getPrivateKey() != null && !request.getPrivateKey().isBlank()) {
             machine.setPrivateKey(request.getPrivateKey());
         }
+        // empty string clears the proxy; null leaves it unchanged
+        if (request.getProxyCommand() != null) {
+            machine.setProxyCommand(request.getProxyCommand().isBlank() ? null : request.getProxyCommand());
+        }
         return toResponse(machineRepository.save(machine));
     }
 
@@ -72,7 +77,7 @@ public class MachineService {
 
     public SshCommandResponse exec(Long machineId, String command, Long ownerId) {
         Machine machine = findByIdAndOwner(machineId, ownerId);
-        return sshService.execute(machine.getHost(), machine.getPort(), machine.getSshUser(), machine.getPrivateKey(), command);
+        return sshService.execute(machine, command);
     }
 
     @Scheduled(fixedDelay = 60_000)
@@ -87,9 +92,7 @@ public class MachineService {
     }
 
     private boolean ping(Machine machine) {
-        SshCommandResponse response = sshService.execute(
-                machine.getHost(), machine.getPort(), machine.getSshUser(), machine.getPrivateKey(), "echo ok"
-        );
+        SshCommandResponse response = sshService.execute(machine, "echo ok");
         boolean online = response.getExitCode() == 0 && response.getStdout().contains("ok");
         machine.setStatus(online ? MachineStatus.ONLINE : MachineStatus.ERROR);
         if (online) machine.setLastSeen(LocalDateTime.now());
@@ -110,6 +113,7 @@ public class MachineService {
                 .port(m.getPort())
                 .sshUser(m.getSshUser())
                 .status(m.getStatus().name())
+                .proxyCommand(m.getProxyCommand())
                 .lastSeen(m.getLastSeen())
                 .createdAt(m.getCreatedAt())
                 .ownerId(m.getOwner().getId())
