@@ -9,6 +9,7 @@ import com.automationcenter.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
+import reactor.core.publisher.Mono;
 
 import java.util.List;
 import java.util.Map;
@@ -19,7 +20,33 @@ public class CloudflareService {
 
     private final UserRepository userRepository;
 
+    @SuppressWarnings("unchecked")
     public void saveToken(Long userId, String token, String accountId) {
+        Map<String, Object> verify;
+        try {
+            verify = buildClient(token)
+                    .get()
+                    .uri("/user/tokens/verify")
+                    .retrieve()
+                    .onStatus(status -> !status.is2xxSuccessful(),
+                            response -> Mono.error(new IllegalArgumentException(
+                                    "Cloudflare rejected the token (HTTP " + response.statusCode().value() + ")")))
+                    .bodyToMono(Map.class)
+                    .block();
+        } catch (IllegalArgumentException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IllegalArgumentException("Could not verify Cloudflare token: " + e.getMessage());
+        }
+
+        if (verify == null || !Boolean.TRUE.equals(verify.get("success"))) {
+            List<Map<String, Object>> errors = (List<Map<String, Object>>) verify.get("errors");
+            String msg = (errors != null && !errors.isEmpty())
+                    ? (String) errors.get(0).get("message")
+                    : "Token verification failed";
+            throw new IllegalArgumentException("Invalid Cloudflare token: " + msg);
+        }
+
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found"));
         user.setCloudflareToken(token);
