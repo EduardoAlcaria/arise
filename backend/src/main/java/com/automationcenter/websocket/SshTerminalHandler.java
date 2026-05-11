@@ -7,8 +7,8 @@ import com.automationcenter.security.JwtService;
 import com.automationcenter.service.MachineService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.automationcenter.service.SshService;
 import com.jcraft.jsch.ChannelShell;
-import com.jcraft.jsch.JSch;
 import com.jcraft.jsch.Session;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -29,6 +29,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public class SshTerminalHandler extends AbstractWebSocketHandler {
 
     private final MachineService machineService;
+    private final SshService sshService;
     private final JwtService jwtService;
     private final UserDetailsService userDetailsService;
     private final UserRepository userRepository;
@@ -85,12 +86,8 @@ public class SshTerminalHandler extends AbstractWebSocketHandler {
             return;
         }
 
-        JSch jsch = new JSch();
         try {
-            jsch.addIdentity("key", machine.getPrivateKey().getBytes(StandardCharsets.UTF_8), null, null);
-
-            Session jschSession = jsch.getSession(machine.getSshUser(), machine.getHost(), machine.getPort());
-            jschSession.setConfig("StrictHostKeyChecking", "no");
+            Session jschSession = sshService.openSession(machine);
             jschSession.connect(15_000);
 
             ChannelShell channel = (ChannelShell) jschSession.openChannel("shell");
