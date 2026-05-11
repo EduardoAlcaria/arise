@@ -322,7 +322,7 @@ public class DeploymentService {
         Deployment deployment = findByIdAndOwner(id, ownerId);
         DeploymentStatus currentStatus = deployment.getStatus();
         if (currentStatus == DeploymentStatus.BUILDING || currentStatus == DeploymentStatus.DEPLOYING || currentStatus == DeploymentStatus.PENDING) {
-            throw new IllegalStateException("Cannot roll back a deployment that is still in progress");
+            throw new IllegalArgumentException("Cannot roll back a deployment that is still in progress");
         }
         Machine machine = deployment.getMachine();
 
