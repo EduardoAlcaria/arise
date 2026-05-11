@@ -5,6 +5,8 @@ export interface AuthResponse {
   role: string
 }
 
+export type TunnelType = 'DIRECT' | 'CLOUDFLARE_TCP' | 'PROXY_COMMAND'
+
 export interface Machine {
   id: number
   name: string
@@ -12,6 +14,7 @@ export interface Machine {
   port: number
   sshUser: string
   status: 'ONLINE' | 'OFFLINE' | 'UNKNOWN' | 'ERROR'
+  tunnelType: TunnelType
   proxyCommand: string | null
   lastSeen: string | null
   createdAt: string
