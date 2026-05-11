@@ -31,6 +31,8 @@ export const getDeployments = (page = 0, size = 20) =>
 export const getDeployment = (id: number) => client.get<Deployment>(`/deployments/${id}`).then((r) => r.data)
 export const createDeployment = (data: DeploymentRequest) => client.post<Deployment>('/deployments', data).then((r) => r.data)
 export const rollbackDeployment = (id: number) => client.post<Deployment>(`/deployments/${id}/rollback`).then((r) => r.data)
+export const redeployDeployment = (id: number) =>
+  client.post<Deployment>(`/deployments/${id}/redeploy`).then((r) => r.data)
 export const getDeploymentLogs = (id: number) => client.get<LogEntry[]>(`/deployments/${id}/logs`).then((r) => r.data)
 export const addDeploymentTunnel = (id: number, tunnelName: string, tunnelHostname: string, tunnelAppPort: number) =>
   client.post<Deployment>(`/deployments/${id}/tunnel`, { tunnelName, tunnelHostname, tunnelAppPort }).then((r) => r.data)
