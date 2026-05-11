@@ -1,11 +1,11 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { getMachines, createMachine, updateMachine, deleteMachine, testMachine, type MachineRequest } from '../api/machines'
-import { Plus, Trash2, Wifi, Terminal, X, Search, Server, Pencil } from 'lucide-react'
+import { Plus, Trash2, Wifi, Terminal, X, Search, Server, Pencil, Loader2 } from 'lucide-react'
 import { OsIcon, StatusDot } from '../components/icons'
 import TerminalModal from '../components/TerminalModal'
 
-const emptyForm: MachineRequest = { name: '', host: '', port: 22, sshUser: '', privateKey: '', proxyCommand: '' }
+const emptyForm: MachineRequest = { name: '', host: '', port: 22, sshUser: '', privateKey: '', tunnelType: 'DIRECT', proxyCommand: '' }
 
 function statusCls(s: string) {
   if (s === 'ONLINE') return 'status-online'
@@ -32,6 +32,7 @@ export default function Machines() {
   const [terminalModal, setTerminalModal] = useState<{ id: number; name: string } | null>(null)
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState<'ALL' | 'ONLINE' | 'OFFLINE' | 'ERROR'>('ALL')
+  const [testingId, setTestingId] = useState<number | null>(null)
 
   const { data: machines, isLoading } = useQuery({ queryKey: ['machines'], queryFn: getMachines })
 
@@ -46,7 +47,11 @@ export default function Machines() {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['machines'] }); closeForm() },
   })
   const deleteMut = useMutation({ mutationFn: deleteMachine, onSuccess: () => qc.invalidateQueries({ queryKey: ['machines'] }) })
-  const testMut   = useMutation({ mutationFn: testMachine })
+  const testMut   = useMutation({
+    mutationFn: testMachine,
+    onMutate: (id) => setTestingId(id),
+    onSettled: () => { setTestingId(null); qc.invalidateQueries({ queryKey: ['machines'] }) },
+  })
 
   const filtered = (machines ?? []).filter(m => {
     if (filter !== 'ALL' && m.status !== filter) return false
@@ -116,10 +121,11 @@ export default function Machines() {
                   <p className="text-xs text-muted-foreground truncate" style={{ fontFamily: "'Fira Code', monospace" }}>
                     {m.sshUser}@{m.host}:{m.port}
                   </p>
-                  {m.proxyCommand && (
-                    <p className="text-[10px] text-muted-foreground truncate mt-0.5" title={m.proxyCommand}>
-                      via proxy
-                    </p>
+                  {m.tunnelType === 'CLOUDFLARE_TCP' && (
+                    <p className="text-[10px] text-orange-400 truncate mt-0.5">via Cloudflare TCP</p>
+                  )}
+                  {m.tunnelType === 'PROXY_COMMAND' && (
+                    <p className="text-[10px] text-muted-foreground truncate mt-0.5" title={m.proxyCommand ?? ''}>via proxy</p>
                   )}
                 </div>
                 <div className="flex items-center gap-1.5">
@@ -133,10 +139,13 @@ export default function Machines() {
               <div className="flex items-center gap-1.5 pt-3 border-t border-border">
                 <button
                   onClick={() => testMut.mutate(m.id)}
+                  disabled={testingId === m.id}
                   title="Test SSH connection"
-                  className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-md text-xs text-muted-foreground hover:text-accent hover:bg-accent/10 transition-colors"
+                  className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-md text-xs text-muted-foreground hover:text-accent hover:bg-accent/10 transition-colors disabled:opacity-50"
                 >
-                  <Wifi size={12} /> Test
+                  {testingId === m.id
+                    ? <><Loader2 size={12} className="animate-spin" /> Testing…</>
+                    : <><Wifi size={12} /> Test</>}
                 </button>
                 <button
                   onClick={() => setTerminalModal({ id: m.id, name: m.name })}
@@ -148,7 +157,7 @@ export default function Machines() {
                 <button
                   onClick={() => {
                     setEditingId(m.id)
-                    setForm({ name: m.name, host: m.host, port: m.port, sshUser: m.sshUser, privateKey: '', proxyCommand: m.proxyCommand ?? '' })
+                    setForm({ name: m.name, host: m.host, port: m.port, sshUser: m.sshUser, privateKey: '', tunnelType: m.tunnelType ?? 'DIRECT', proxyCommand: m.proxyCommand ?? '' })
                     setShowForm(true)
                   }}
                   title="Edit"
@@ -216,19 +225,40 @@ export default function Machines() {
                 />
               </div>
               <div>
-                <label className="block text-[11px] font-semibold text-muted-foreground mb-1.5 uppercase tracking-widest">
-                  Proxy Command <span className="normal-case font-normal text-muted-foreground">(optional)</span>
-                </label>
-                <input
-                  className="input-field mono"
-                  placeholder="cloudflared access ssh --hostname %h"
-                  value={form.proxyCommand ?? ''}
-                  onChange={e => setForm({ ...form, proxyCommand: e.target.value })}
-                />
-                <p className="text-[10px] text-muted-foreground mt-1">
-                  Required for machines behind Cloudflare SSH tunnels. Use %h and %p as host/port placeholders.
-                </p>
+                <label className="block text-[11px] font-semibold text-muted-foreground mb-1.5 uppercase tracking-widest">Connection Type</label>
+                <div className="grid grid-cols-3 gap-2">
+                  {(['DIRECT', 'CLOUDFLARE_TCP', 'PROXY_COMMAND'] as const).map(t => (
+                    <button
+                      key={t}
+                      type="button"
+                      onClick={() => setForm({ ...form, tunnelType: t })}
+                      className={`py-2 px-3 rounded-lg text-xs font-medium border transition-colors text-left ${form.tunnelType === t ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:text-foreground'}`}
+                    >
+                      {t === 'DIRECT' && 'Direct SSH'}
+                      {t === 'CLOUDFLARE_TCP' && 'Cloudflare TCP'}
+                      {t === 'PROXY_COMMAND' && 'Proxy Command'}
+                    </button>
+                  ))}
+                </div>
+                {form.tunnelType === 'CLOUDFLARE_TCP' && (
+                  <p className="text-[10px] text-muted-foreground mt-1.5">
+                    Arise will run <code className="font-mono">cloudflared access tcp</code> automatically. Host should be your tunnel hostname (e.g. <code className="font-mono">ssh.arise.alcaria.dev</code>).
+                  </p>
+                )}
               </div>
+
+              {form.tunnelType === 'PROXY_COMMAND' && (
+                <div>
+                  <label className="block text-[11px] font-semibold text-muted-foreground mb-1.5 uppercase tracking-widest">Proxy Command</label>
+                  <input
+                    className="input-field mono"
+                    placeholder="nc %h %p"
+                    value={form.proxyCommand ?? ''}
+                    onChange={e => setForm({ ...form, proxyCommand: e.target.value })}
+                  />
+                  <p className="text-[10px] text-muted-foreground mt-1">Use %h and %p as host/port placeholders.</p>
+                </div>
+              )}
               {(createMut.error || updateMut.error) && (
                 <p className="text-destructive text-xs">
                   {((createMut.error ?? updateMut.error) as any)?.response?.data?.message ?? 'Request failed'}
