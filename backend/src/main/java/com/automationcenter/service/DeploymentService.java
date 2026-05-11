@@ -128,10 +128,12 @@ public class DeploymentService {
             deployment.setDeployDir(repoDir);
             deploymentRepository.save(deployment);
 
-            var shaResult = sshService.execute(machine, "cd " + repoDir + " && git rev-parse HEAD 2>/dev/null || echo ''");
-            if (shaResult.getExitCode() == 0 && !shaResult.getStdout().isBlank()) {
-                deployment.setResolvedCommitSha(shaResult.getStdout().trim());
-                deploymentRepository.save(deployment);
+            if (!isWindows) {
+                var shaResult = sshService.execute(machine, "cd " + repoDir + " && git rev-parse HEAD 2>/dev/null || echo ''");
+                if (shaResult.getExitCode() == 0 && !shaResult.getStdout().isBlank()) {
+                    deployment.setResolvedCommitSha(shaResult.getStdout().trim());
+                    deploymentRepository.save(deployment);
+                }
             }
 
             // Detect stack
@@ -318,6 +320,10 @@ public class DeploymentService {
 
     public DeploymentResponse rollback(Long id, Long ownerId) {
         Deployment deployment = findByIdAndOwner(id, ownerId);
+        DeploymentStatus currentStatus = deployment.getStatus();
+        if (currentStatus == DeploymentStatus.BUILDING || currentStatus == DeploymentStatus.DEPLOYING || currentStatus == DeploymentStatus.PENDING) {
+            throw new IllegalStateException("Cannot roll back a deployment that is still in progress");
+        }
         Machine machine = deployment.getMachine();
 
         if (deployment.getDeployDir() != null && machine != null) {
