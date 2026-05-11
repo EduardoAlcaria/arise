@@ -7,6 +7,7 @@ export interface MachineRequest {
   port: number
   sshUser: string
   privateKey: string
+  proxyCommand?: string
 }
 
 export const getMachines = () => client.get<Machine[]>('/machines').then((r) => r.data)
