@@ -3,7 +3,7 @@ import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
 import {
   LayoutDashboard, Server, Box, Rocket, GitFork, Globe,
-  LogOut, ChevronLeft, ChevronRight, Menu, X, Zap, Settings, Network
+  LogOut, ChevronLeft, ChevronRight, Menu, X, Zap, Settings, Network, Workflow
 } from 'lucide-react'
 
 const NAV = [
@@ -11,7 +11,8 @@ const NAV = [
   { to: '/machines',    label: 'Machines',    icon: Server },
   { to: '/containers',  label: 'Containers',  icon: Box },
   { to: '/deployments', label: 'Deployments', icon: Rocket },
-  { to: '/topology',   label: 'Topology',    icon: Network },
+  { to: '/cicd',        label: 'CI/CD',       icon: Workflow },
+  { to: '/topology',    label: 'Topology',    icon: Network },
   { to: '/github',      label: 'GitHub',      icon: GitFork },
   { to: '/cloudflare',  label: 'Cloudflare',  icon: Globe },
   { to: '/settings',    label: 'Settings',    icon: Settings },

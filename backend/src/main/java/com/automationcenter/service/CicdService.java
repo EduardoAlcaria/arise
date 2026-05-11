@@ -84,6 +84,110 @@ public class CicdService {
         return CompletableFuture.completedFuture(output.toString());
     }
 
+    public void rerunWorkflow(Long userId, String owner, String repo, Long runId) {
+        User user = getUser(userId);
+        webClientBuilder.build()
+                .post()
+                .uri("https://api.github.com/repos/{owner}/{repo}/actions/runs/{runId}/rerun", owner, repo, runId)
+                .header("Authorization", "token " + user.getGithubToken())
+                .header("Accept", "application/vnd.github+json")
+                .retrieve()
+                .bodyToMono(Map.class)
+                .block();
+    }
+
+    public void triggerWorkflow(Long userId, String owner, String repo, String workflowId, String ref) {
+        User user = getUser(userId);
+        webClientBuilder.build()
+                .post()
+                .uri("https://api.github.com/repos/{owner}/{repo}/actions/workflows/{workflowId}/dispatches",
+                        owner, repo, workflowId)
+                .header("Authorization", "token " + user.getGithubToken())
+                .header("Accept", "application/vnd.github+json")
+                .bodyValue(Map.of("ref", ref))
+                .retrieve()
+                .bodyToMono(Map.class)
+                .block();
+    }
+
+    public List<Map<String, Object>> getWorkflowJobs(Long userId, String owner, String repo, Long runId) {
+        User user = getUser(userId);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> response = webClientBuilder.build()
+                .get()
+                .uri("https://api.github.com/repos/{owner}/{repo}/actions/runs/{runId}/jobs", owner, repo, runId)
+                .header("Authorization", "token " + user.getGithubToken())
+                .header("Accept", "application/vnd.github+json")
+                .retrieve()
+                .bodyToMono(Map.class)
+                .block();
+        if (response == null) return List.of();
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> jobs = (List<Map<String, Object>>) response.get("jobs");
+        if (jobs == null) return List.of();
+        return jobs.stream().map(job -> {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("id", job.get("id"));
+            item.put("name", job.get("name"));
+            item.put("status", job.get("status"));
+            item.put("conclusion", job.get("conclusion"));
+            item.put("startedAt", job.get("started_at"));
+            item.put("completedAt", job.get("completed_at"));
+            item.put("htmlUrl", job.get("html_url"));
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> steps = (List<Map<String, Object>>) job.get("steps");
+            if (steps != null) {
+                item.put("steps", steps.stream().map(s -> Map.of(
+                        "name", s.getOrDefault("name", ""),
+                        "status", s.getOrDefault("status", ""),
+                        "conclusion", s.getOrDefault("conclusion", ""),
+                        "number", s.getOrDefault("number", 0)
+                )).toList());
+            }
+            return item;
+        }).toList();
+    }
+
+    public List<Map<String, Object>> listRunners(Long userId, String owner, String repo) {
+        User user = getUser(userId);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> response = webClientBuilder.build()
+                .get()
+                .uri("https://api.github.com/repos/{owner}/{repo}/actions/runners", owner, repo)
+                .header("Authorization", "token " + user.getGithubToken())
+                .header("Accept", "application/vnd.github+json")
+                .retrieve()
+                .bodyToMono(Map.class)
+                .block();
+        if (response == null) return List.of();
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> runners = (List<Map<String, Object>>) response.get("runners");
+        if (runners == null) return List.of();
+        return runners.stream().map(r -> {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("id", r.get("id"));
+            item.put("name", r.get("name"));
+            item.put("status", r.get("status"));
+            item.put("busy", r.get("busy"));
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> labels = (List<Map<String, Object>>) r.get("labels");
+            item.put("labels", labels != null ? labels.stream().map(l -> l.get("name")).toList() : List.of());
+            return item;
+        }).toList();
+    }
+
+    public void deleteRunner(Long userId, String owner, String repo, Long runnerId) {
+        User user = getUser(userId);
+        webClientBuilder.build()
+                .delete()
+                .uri("https://api.github.com/repos/{owner}/{repo}/actions/runners/{runnerId}", owner, repo, runnerId)
+                .header("Authorization", "token " + user.getGithubToken())
+                .header("Accept", "application/vnd.github+json")
+                .retrieve()
+                .bodyToMono(Void.class)
+                .block();
+    }
+
     public List<Map<String, Object>> getWorkflowRuns(Long userId, String owner, String repo) {
         User user = getUser(userId);
         try {
