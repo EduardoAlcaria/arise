@@ -26,6 +26,16 @@ public class CicdController {
         return ResponseEntity.ok(cicdService.detectWorkflows(user.getId(), owner, repo));
     }
 
+    @PostMapping("/push/{owner}/{repo}")
+    public ResponseEntity<Void> triggerByPush(
+            @PathVariable String owner,
+            @PathVariable String repo,
+            @RequestParam(defaultValue = "main") String ref,
+            @AuthenticationPrincipal User user) {
+        cicdService.triggerByPush(user.getId(), owner, repo, ref);
+        return ResponseEntity.noContent().build();
+    }
+
     @PostMapping("/runner/{owner}/{repo}/setup")
     public ResponseEntity<Map<String, String>> setupRunner(
             @PathVariable String owner,

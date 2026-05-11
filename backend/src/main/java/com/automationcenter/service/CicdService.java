@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 
+import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -182,6 +183,56 @@ public class CicdService {
                     ? "Workflow '" + workflowId + "' does not have 'on: workflow_dispatch' trigger. Add it to enable manual runs."
                     : "GitHub API error " + e.getStatusCode().value() + ": " + e.getResponseBodyAsString();
             throw new IllegalArgumentException(msg);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    public void triggerByPush(Long userId, String owner, String repo, String ref) {
+        User user = getUser(userId);
+        String path = ".arise/deploy-trigger";
+        String content = Base64.getEncoder().encodeToString(
+                ("Triggered by Arise at " + java.time.Instant.now()).getBytes()
+        );
+
+        // Get current file SHA if it already exists (required for updates)
+        String existingSha = null;
+        try {
+            Map<String, Object> existing = webClientBuilder.build()
+                    .get()
+                    .uri("https://api.github.com/repos/{owner}/{repo}/contents/{path}?ref={ref}",
+                            owner, repo, path, ref)
+                    .header("Authorization", "token " + user.getGithubToken())
+                    .header("Accept", "application/vnd.github+json")
+                    .retrieve()
+                    .bodyToMono(Map.class)
+                    .block();
+            if (existing != null) existingSha = (String) existing.get("sha");
+        } catch (WebClientResponseException e) {
+            if (e.getStatusCode().value() != 404) {
+                throw new IllegalArgumentException("GitHub API error " + e.getStatusCode().value()
+                        + " checking trigger file: " + e.getResponseBodyAsString());
+            }
+        }
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("message", "chore: trigger deployment via Arise");
+        body.put("content", content);
+        body.put("branch", ref);
+        if (existingSha != null) body.put("sha", existingSha);
+
+        try {
+            webClientBuilder.build()
+                    .put()
+                    .uri("https://api.github.com/repos/{owner}/{repo}/contents/{path}", owner, repo, path)
+                    .header("Authorization", "token " + user.getGithubToken())
+                    .header("Accept", "application/vnd.github+json")
+                    .bodyValue(body)
+                    .retrieve()
+                    .bodyToMono(Void.class)
+                    .block();
+        } catch (WebClientResponseException e) {
+            throw new IllegalArgumentException("Failed to push trigger commit: HTTP " + e.getStatusCode().value()
+                    + " — " + e.getResponseBodyAsString());
         }
     }
 

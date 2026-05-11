@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   getWorkflows, getWorkflowRuns, getWorkflowJobs, listRunners,
-  rerunWorkflow, triggerWorkflow, deleteRunner, setupRunner,
+  rerunWorkflow, triggerWorkflow, triggerByPush, deleteRunner, setupRunner,
   type WorkflowRun, type WorkflowJob, type Runner,
 } from '../api/cicd'
 import { getDeployments } from '../api/deployments'
@@ -182,32 +182,72 @@ function TriggerModal({
   const qc = useQueryClient()
   const [workflow, setWorkflow] = useState(workflows[0] ?? '')
   const [ref, setRef] = useState('main')
+  const [mode, setMode] = useState<'dispatch' | 'push'>('dispatch')
 
-  const triggerMut = useMutation({
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ['cicd-runs', owner, repo] })
+    onClose()
+  }
+
+  const dispatchMut = useMutation({
     mutationFn: () => triggerWorkflow(owner, repo, workflow, ref),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['cicd-runs'] })
-      onClose()
+    onSuccess: invalidate,
+    onError: (err: any) => {
+      const msg = err?.response?.data?.message ?? ''
+      if (msg.includes('workflow_dispatch')) setMode('push')
     },
   })
+
+  const pushMut = useMutation({
+    mutationFn: () => triggerByPush(owner, repo, ref),
+    onSuccess: invalidate,
+  })
+
+  const activeMut = mode === 'dispatch' ? dispatchMut : pushMut
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60">
       <div className="bg-card border border-border rounded-xl p-6 w-full max-w-sm shadow-2xl space-y-4">
         <h2 className="text-sm font-semibold">Trigger Workflow</h2>
-        <div className="space-y-3">
-          <div>
-            <label className="text-xs text-muted-foreground mb-1 block">Workflow</label>
-            <select
-              value={workflow}
-              onChange={e => setWorkflow(e.target.value)}
-              className="input w-full"
+
+        {/* Mode toggle */}
+        <div className="flex rounded-lg border border-border overflow-hidden text-xs font-medium">
+          {(['dispatch', 'push'] as const).map(m => (
+            <button
+              key={m}
+              onClick={() => setMode(m)}
+              className="flex-1 py-2 capitalize transition-colors"
+              style={{
+                background: mode === m ? 'var(--color-primary)' : 'transparent',
+                color: mode === m ? 'var(--color-primary-foreground)' : 'var(--color-muted-foreground)',
+              }}
             >
-              {workflows.map(w => <option key={w} value={w}>{w}</option>)}
-            </select>
-          </div>
+              {m === 'dispatch' ? 'workflow_dispatch' : 'Push commit'}
+            </button>
+          ))}
+        </div>
+
+        <p className="text-xs text-muted-foreground">
+          {mode === 'dispatch'
+            ? 'Trigger via GitHub\'s workflow_dispatch event. Requires the workflow to have on: workflow_dispatch.'
+            : 'Pushes a small trigger file (.arise/deploy-trigger) to the repo, firing on: push workflows.'}
+        </p>
+
+        <div className="space-y-3">
+          {mode === 'dispatch' && (
+            <div>
+              <label className="text-xs text-muted-foreground mb-1 block">Workflow</label>
+              <select
+                value={workflow}
+                onChange={e => setWorkflow(e.target.value)}
+                className="input w-full"
+              >
+                {workflows.map(w => <option key={w} value={w}>{w}</option>)}
+              </select>
+            </div>
+          )}
           <div>
-            <label className="text-xs text-muted-foreground mb-1 block">Branch / Ref</label>
+            <label className="text-xs text-muted-foreground mb-1 block">Branch</label>
             <input
               value={ref}
               onChange={e => setRef(e.target.value)}
@@ -216,20 +256,25 @@ function TriggerModal({
             />
           </div>
         </div>
-        {triggerMut.error && (
+
+        {activeMut.error && (
           <p className="text-xs text-destructive">
-            {(triggerMut.error as any)?.response?.data?.message ?? 'Failed to trigger'}
+            {(activeMut.error as any)?.response?.data?.message ?? 'Failed to trigger'}
           </p>
         )}
+        {activeMut.isSuccess && (
+          <p className="text-xs text-green-400">Triggered — run should appear shortly.</p>
+        )}
+
         <div className="flex gap-2 justify-end">
           <button className="btn-ghost text-sm" onClick={onClose}>Cancel</button>
           <button
             className="btn-primary text-sm flex items-center gap-1.5"
-            onClick={() => triggerMut.mutate()}
-            disabled={triggerMut.isPending || !workflow}
+            onClick={() => activeMut.mutate()}
+            disabled={activeMut.isPending || (mode === 'dispatch' && !workflow)}
           >
-            {triggerMut.isPending && <Loader2 size={12} className="animate-spin" />}
-            <Play size={12} /> Trigger
+            {activeMut.isPending && <Loader2 size={12} className="animate-spin" />}
+            <Play size={12} /> {mode === 'dispatch' ? 'Trigger' : 'Push & Trigger'}
           </button>
         </div>
       </div>
