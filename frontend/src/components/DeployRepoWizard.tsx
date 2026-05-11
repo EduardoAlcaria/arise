@@ -20,6 +20,7 @@ interface RepoSel {
 export interface DeployItem {
   repoUrl: string; branch: string; name: string; machineId: number
   tunnelName?: string; tunnelHostname?: string; tunnelAppPort?: number
+  configFiles?: ConfigFileItem[]
 }
 export interface AppDeployPayload {
   name: string
@@ -246,6 +247,7 @@ export default function DeployRepoWizard({
         name: deployNames.get(sel.repo.fullName) || sel.repo.name,
         machineId,
         ...tunnelFields,
+        configFiles: envFile ? [envFile] : undefined,
       }))
       try { await onDeploy(items) } catch (e: any) { setDeployError(e.message || 'Deployment failed') }
     } else {

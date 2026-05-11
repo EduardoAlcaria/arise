@@ -147,6 +147,7 @@ export default function Deployments() {
           name: item.name, type: 'REPOSITORY',
           repositoryUrl: item.repoUrl, branch: item.branch, machineId: item.machineId,
           tunnelName: item.tunnelName, tunnelHostname: item.tunnelHostname, tunnelAppPort: item.tunnelAppPort,
+          configFiles: item.configFiles,
         })
         if (!first) first = dep
       }
