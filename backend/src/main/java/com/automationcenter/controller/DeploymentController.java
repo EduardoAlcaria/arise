@@ -3,9 +3,12 @@ package com.automationcenter.controller;
 import com.automationcenter.dto.deployment.DeploymentRequest;
 import com.automationcenter.dto.deployment.DeploymentResponse;
 import com.automationcenter.dto.deployment.TunnelRequest;
+import com.automationcenter.entity.Deployment;
+import com.automationcenter.entity.DeploymentStatus;
 import com.automationcenter.entity.LogEntry;
 import com.automationcenter.entity.User;
 import com.automationcenter.service.DeploymentService;
+import com.automationcenter.service.LogBroadcaster;
 import com.automationcenter.service.LogService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -20,7 +23,6 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
 import java.util.List;
-import java.util.concurrent.Executors;
 
 @RestController
 @RequestMapping("/api/deployments")
@@ -29,6 +31,7 @@ public class DeploymentController {
 
     private final DeploymentService deploymentService;
     private final LogService logService;
+    private final LogBroadcaster logBroadcaster;
 
     @PostMapping
     public ResponseEntity<DeploymentResponse> create(
@@ -69,39 +72,34 @@ public class DeploymentController {
 
     @GetMapping(value = "/{id}/logs/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter streamLogs(@PathVariable Long id, @AuthenticationPrincipal User user) {
+        Deployment deployment = deploymentService.findRawById(id, user.getId());
+
         SseEmitter emitter = new SseEmitter(300_000L);
-        final long[] lastId = {0L};
 
-        Executors.newSingleThreadExecutor().submit(() -> {
+        // Replay all existing log entries
+        List<LogEntry> existing = logService.findByDeploymentId(id);
+        for (LogEntry entry : existing) {
             try {
-                while (true) {
-                    List<LogEntry> newLogs = logService.findByDeploymentIdAfter(id, lastId[0]);
-                    for (LogEntry log : newLogs) {
-                        emitter.send(SseEmitter.event()
-                                .id(log.getId().toString())
-                                .data(log.getMessage()));
-                        lastId[0] = log.getId();
-                    }
-
-                    var deployment = deploymentService.findRawById(id, user.getId());
-                    var status = deployment.getStatus();
-                    if (status.name().equals("SUCCESS") || status.name().equals("FAILED") ||
-                            status.name().equals("ROLLED_BACK")) {
-                        emitter.complete();
-                        return;
-                    }
-                    Thread.sleep(1000);
-                }
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                emitter.complete();
+                emitter.send(SseEmitter.event()
+                        .id(entry.getId().toString())
+                        .data(entry.getMessage()));
             } catch (IOException e) {
                 emitter.completeWithError(e);
-            } catch (Exception e) {
-                emitter.completeWithError(e);
+                return emitter;
             }
-        });
+        }
 
+        // If already terminal, complete immediately — no need to subscribe
+        DeploymentStatus status = deployment.getStatus();
+        if (status == DeploymentStatus.SUCCESS
+                || status == DeploymentStatus.FAILED
+                || status == DeploymentStatus.ROLLED_BACK) {
+            emitter.complete();
+            return emitter;
+        }
+
+        // Still running — subscribe for live push from the broadcaster
+        logBroadcaster.register(id, emitter);
         return emitter;
     }
 }

@@ -37,6 +37,7 @@ public class DeploymentService {
     private final RabbitTemplate rabbitTemplate;
     private final ObjectMapper objectMapper;
     private final CloudflareService cloudflareService;
+    private final LogBroadcaster logBroadcaster;
 
     public DeploymentResponse create(DeploymentRequest request, Long ownerId) {
         User owner = userRepository.findById(ownerId)
@@ -174,6 +175,7 @@ public class DeploymentService {
             deployment.setFinishedAt(LocalDateTime.now());
             deploymentRepository.save(deployment);
             appendLog(deployment, "Deployment completed successfully", LogLevel.INFO);
+            logBroadcaster.complete(deployment.getId());
 
             rabbitTemplate.convertAndSend(
                     RabbitMQConfig.DEPLOYMENT_EXCHANGE,
@@ -286,6 +288,7 @@ public class DeploymentService {
             deployment.setFinishedAt(LocalDateTime.now());
             deploymentRepository.save(deployment);
             appendLog(deployment, "Application deployed successfully", LogLevel.INFO);
+            logBroadcaster.complete(deployment.getId());
             rabbitTemplate.convertAndSend(RabbitMQConfig.DEPLOYMENT_EXCHANGE,
                     RabbitMQConfig.DEPLOYMENT_ROUTING_KEY, "DEPLOYMENT_SUCCESS:" + deployment.getId());
 
@@ -356,6 +359,7 @@ public class DeploymentService {
                 RabbitMQConfig.DEPLOYMENT_ROUTING_KEY,
                 "DEPLOYMENT_FAILED:" + deployment.getId()
         );
+        logBroadcaster.complete(deployment.getId());
     }
 
     private void appendLog(Deployment deployment, String message, LogLevel level) {
@@ -364,6 +368,7 @@ public class DeploymentService {
         String existing = deployment.getLogs() == null ? "" : deployment.getLogs();
         deployment.setLogs(existing + "\n" + message);
         deploymentRepository.save(deployment);
+        logBroadcaster.publish(deployment.getId(), message);
     }
 
     private String detectStack(Machine machine, String repoDir, boolean isWindows) {
