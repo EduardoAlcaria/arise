@@ -5,7 +5,7 @@ import { Plus, Trash2, Wifi, Terminal, X, Search, Server, Pencil } from 'lucide-
 import { OsIcon, StatusDot } from '../components/icons'
 import TerminalModal from '../components/TerminalModal'
 
-const emptyForm: MachineRequest = { name: '', host: '', port: 22, sshUser: '', privateKey: '' }
+const emptyForm: MachineRequest = { name: '', host: '', port: 22, sshUser: '', privateKey: '', proxyCommand: '' }
 
 function statusCls(s: string) {
   if (s === 'ONLINE') return 'status-online'
@@ -116,6 +116,11 @@ export default function Machines() {
                   <p className="text-xs text-muted-foreground truncate" style={{ fontFamily: "'Fira Code', monospace" }}>
                     {m.sshUser}@{m.host}:{m.port}
                   </p>
+                  {m.proxyCommand && (
+                    <p className="text-[10px] text-muted-foreground truncate mt-0.5" title={m.proxyCommand}>
+                      via proxy
+                    </p>
+                  )}
                 </div>
                 <div className="flex items-center gap-1.5">
                   <StatusDot status={m.status} />
@@ -143,7 +148,7 @@ export default function Machines() {
                 <button
                   onClick={() => {
                     setEditingId(m.id)
-                    setForm({ name: m.name, host: m.host, port: m.port, sshUser: m.sshUser, privateKey: '' })
+                    setForm({ name: m.name, host: m.host, port: m.port, sshUser: m.sshUser, privateKey: '', proxyCommand: m.proxyCommand ?? '' })
                     setShowForm(true)
                   }}
                   title="Edit"
@@ -209,6 +214,20 @@ export default function Machines() {
                   value={form.privateKey}
                   onChange={e => setForm({ ...form, privateKey: e.target.value })}
                 />
+              </div>
+              <div>
+                <label className="block text-[11px] font-semibold text-muted-foreground mb-1.5 uppercase tracking-widest">
+                  Proxy Command <span className="normal-case font-normal text-muted-foreground">(optional)</span>
+                </label>
+                <input
+                  className="input-field mono"
+                  placeholder="cloudflared access ssh --hostname %h"
+                  value={form.proxyCommand ?? ''}
+                  onChange={e => setForm({ ...form, proxyCommand: e.target.value })}
+                />
+                <p className="text-[10px] text-muted-foreground mt-1">
+                  Required for machines behind Cloudflare SSH tunnels. Use %h and %p as host/port placeholders.
+                </p>
               </div>
               {(createMut.error || updateMut.error) && (
                 <p className="text-destructive text-xs">

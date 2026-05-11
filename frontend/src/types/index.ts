@@ -12,6 +12,7 @@ export interface Machine {
   port: number
   sshUser: string
   status: 'ONLINE' | 'OFFLINE' | 'UNKNOWN' | 'ERROR'
+  proxyCommand: string | null
   lastSeen: string | null
   createdAt: string
   ownerId: number
