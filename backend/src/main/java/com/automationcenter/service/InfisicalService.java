@@ -33,9 +33,12 @@ public class InfisicalService {
 
             if (response == null) return null;
             return (String) response.get("accessToken");
+        } catch (org.springframework.web.reactive.function.client.WebClientResponseException e) {
+            log.error("Infisical authentication failed ({}): {}", e.getStatusCode(), e.getMessage());
+            throw new IllegalArgumentException("Infisical rejected the credentials (HTTP " + e.getStatusCode().value() + ") — check client ID and secret");
         } catch (Exception e) {
             log.error("Infisical authentication failed: {}", e.getMessage());
-            return null;
+            throw new IllegalArgumentException("Could not reach Infisical at " + baseUrl + " — check the base URL and network connectivity");
         }
     }
 
