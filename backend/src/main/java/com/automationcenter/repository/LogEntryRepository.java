@@ -8,4 +8,5 @@ import java.util.List;
 public interface LogEntryRepository extends JpaRepository<LogEntry, Long> {
     List<LogEntry> findByDeploymentIdOrderByCreatedAtAsc(Long deploymentId);
     List<LogEntry> findByDeploymentIdAndIdGreaterThanOrderByCreatedAtAsc(Long deploymentId, Long afterId);
+    void deleteByDeploymentId(Long deploymentId);
 }

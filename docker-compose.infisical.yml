@@ -1,0 +1,46 @@
+version: '3.8'
+
+# Run standalone: docker compose -f docker-compose.infisical.yml up -d
+# Then open http://localhost:8888 to create your account.
+# In Arise Settings → Infisical, set Base URL to http://<your-server-ip>:8888
+
+services:
+  infisical:
+    image: infisical/infisical:latest-postgres
+    ports:
+      - "8888:8080"
+    environment:
+      NODE_ENV: production
+      ENCRYPTION_KEY: ${INFISICAL_ENCRYPTION_KEY:-a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4}
+      AUTH_SECRET: ${INFISICAL_AUTH_SECRET:-b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2}
+      SITE_URL: ${INFISICAL_SITE_URL:-http://localhost:8888}
+      DB_CONNECTION_URI: postgresql://infisical:infisical@infisical_postgres:5432/infisical
+      REDIS_URL: redis://infisical_redis:6379
+    depends_on:
+      infisical_postgres:
+        condition: service_healthy
+      infisical_redis:
+        condition: service_started
+    restart: unless-stopped
+
+  infisical_postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: infisical
+      POSTGRES_PASSWORD: infisical
+      POSTGRES_DB: infisical
+    volumes:
+      - infisical_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U infisical -d infisical"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  infisical_redis:
+    image: redis:7.2
+    restart: unless-stopped
+
+volumes:
+  infisical_postgres_data:

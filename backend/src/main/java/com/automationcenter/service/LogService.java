@@ -32,4 +32,9 @@ public class LogService {
         return logEntryRepository.findByDeploymentIdOrderByCreatedAtAsc(deploymentId);
     }
 
+    @org.springframework.transaction.annotation.Transactional
+    public void deleteByDeploymentId(Long deploymentId) {
+        logEntryRepository.deleteByDeploymentId(deploymentId);
+    }
+
 }

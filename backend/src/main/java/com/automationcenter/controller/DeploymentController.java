@@ -54,6 +54,21 @@ public class DeploymentController {
         return ResponseEntity.ok(deploymentService.getById(id, user.getId()));
     }
 
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Void> delete(
+            @PathVariable Long id,
+            @AuthenticationPrincipal User user) {
+        deploymentService.delete(id, user.getId());
+        return ResponseEntity.noContent().build();
+    }
+
+    @DeleteMapping("/{id}/tunnel")
+    public ResponseEntity<DeploymentResponse> removeTunnel(
+            @PathVariable Long id,
+            @AuthenticationPrincipal User user) {
+        return ResponseEntity.ok(deploymentService.removeTunnel(id, user.getId()));
+    }
+
     @PostMapping("/{id}/rollback")
     public ResponseEntity<DeploymentResponse> rollback(
             @PathVariable Long id,
