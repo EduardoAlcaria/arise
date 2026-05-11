@@ -377,7 +377,8 @@ export default function Deployments() {
                               <button
                                 onClick={() => redeployMut.mutate(run.id)}
                                 title="Redeploy"
-                                className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-primary transition-colors"
+                                disabled={redeployMut.isPending}
+                                className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-primary transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                               >
                                 <RefreshCw size={13} />
                               </button>
