@@ -5,6 +5,7 @@ import com.automationcenter.dto.machine.MachineResponse;
 import com.automationcenter.dto.machine.SshCommandResponse;
 import com.automationcenter.entity.Machine;
 import com.automationcenter.entity.MachineStatus;
+import com.automationcenter.entity.TunnelType;
 import com.automationcenter.entity.User;
 import com.automationcenter.exception.ResourceNotFoundException;
 import com.automationcenter.repository.MachineRepository;
@@ -35,6 +36,7 @@ public class MachineService {
                 .port(request.getPort())
                 .sshUser(request.getSshUser())
                 .privateKey(request.getPrivateKey())
+                .tunnelType(request.getTunnelType() != null ? request.getTunnelType() : TunnelType.DIRECT)
                 .proxyCommand(request.getProxyCommand())
                 .owner(owner)
                 .build();
@@ -57,6 +59,9 @@ public class MachineService {
         machine.setSshUser(request.getSshUser());
         if (request.getPrivateKey() != null && !request.getPrivateKey().isBlank()) {
             machine.setPrivateKey(request.getPrivateKey());
+        }
+        if (request.getTunnelType() != null) {
+            machine.setTunnelType(request.getTunnelType());
         }
         // empty string clears the proxy; null leaves it unchanged
         if (request.getProxyCommand() != null) {
@@ -113,6 +118,7 @@ public class MachineService {
                 .port(m.getPort())
                 .sshUser(m.getSshUser())
                 .status(m.getStatus().name())
+                .tunnelType(m.getTunnelType() != null ? m.getTunnelType() : TunnelType.DIRECT)
                 .proxyCommand(m.getProxyCommand())
                 .lastSeen(m.getLastSeen())
                 .createdAt(m.getCreatedAt())
