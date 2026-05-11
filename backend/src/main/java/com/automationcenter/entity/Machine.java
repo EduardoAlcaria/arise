@@ -30,6 +30,11 @@ public class Machine {
     @Column(columnDefinition = "TEXT", nullable = false)
     private String privateKey;
 
+    @Enumerated(EnumType.STRING)
+    @Column(length = 20)
+    @Builder.Default
+    private TunnelType tunnelType = TunnelType.DIRECT;
+
     @Column(columnDefinition = "TEXT")
     private String proxyCommand;
 
