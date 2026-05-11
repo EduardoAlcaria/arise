@@ -125,6 +125,15 @@ public class DeploymentService {
                 return;
             }
 
+            deployment.setDeployDir(repoDir);
+            deploymentRepository.save(deployment);
+
+            var shaResult = sshService.execute(machine, "cd " + repoDir + " && git rev-parse HEAD 2>/dev/null || echo ''");
+            if (shaResult.getExitCode() == 0 && !shaResult.getStdout().isBlank()) {
+                deployment.setResolvedCommitSha(shaResult.getStdout().trim());
+                deploymentRepository.save(deployment);
+            }
+
             // Detect stack
             String stack = detectStack(machine, repoDir, isWindows);
             deployment.setDetectedStack(stack);
@@ -206,6 +215,9 @@ public class DeploymentService {
                 fail(deployment);
                 return;
             }
+
+            deployment.setDeployDir(baseDir);
+            deploymentRepository.save(deployment);
 
             for (AppServiceDto service : services) {
                 String serviceDir = baseDir + "/" + service.getName();
@@ -306,8 +318,26 @@ public class DeploymentService {
 
     public DeploymentResponse rollback(Long id, Long ownerId) {
         Deployment deployment = findByIdAndOwner(id, ownerId);
+        Machine machine = deployment.getMachine();
+
+        if (deployment.getDeployDir() != null && machine != null) {
+            appendLog(deployment, "Rolling back: stopping containers in " + deployment.getDeployDir(), LogLevel.INFO);
+            try {
+                String downCmd = "cd " + deployment.getDeployDir() + " && docker compose down 2>&1";
+                var result = sshService.execute(machine, downCmd);
+                appendLog(deployment, result.getStdout(), LogLevel.INFO);
+                if (result.getExitCode() != 0) {
+                    appendLog(deployment, "docker compose down exited with code " + result.getExitCode() + ": " + result.getStderr(), LogLevel.WARN);
+                }
+            } catch (Exception e) {
+                appendLog(deployment, "Rollback SSH failed: " + e.getMessage(), LogLevel.WARN);
+            }
+        }
+
         deployment.setStatus(DeploymentStatus.ROLLED_BACK);
-        return toResponse(deploymentRepository.save(deployment));
+        deployment.setFinishedAt(LocalDateTime.now());
+        deploymentRepository.save(deployment);
+        return toResponse(deployment);
     }
 
     public DeploymentResponse addTunnel(Long deploymentId, Long ownerId, String tunnelName, String tunnelHostname, int tunnelAppPort) {
@@ -431,6 +461,8 @@ public class DeploymentService {
                 .tunnelHostname(d.getTunnelHostname())
                 .cloudfareTunnelId(d.getCloudfareTunnelId())
                 .cloudfareTunnelUrl(d.getCloudfareTunnelUrl())
+                .deployDir(d.getDeployDir())
+                .resolvedCommitSha(d.getResolvedCommitSha())
                 .machineId(d.getMachine() != null ? d.getMachine().getId() : null)
                 .machineName(d.getMachine() != null ? d.getMachine().getName() : null)
                 .ownerId(d.getOwner().getId())

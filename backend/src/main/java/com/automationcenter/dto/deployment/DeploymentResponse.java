@@ -23,6 +23,8 @@ public class DeploymentResponse {
     private String tunnelHostname;
     private String cloudfareTunnelId;
     private String cloudfareTunnelUrl;
+    private String deployDir;
+    private String resolvedCommitSha;
     private Long machineId;
     private String machineName;
     private Long ownerId;
