@@ -71,8 +71,7 @@ public class CicdService {
                     "sudo ./svc.sh start"
             );
 
-            var result = sshService.execute(
-                    machine.getHost(), machine.getPort(), machine.getSshUser(), machine.getPrivateKey(), command);
+            var result = sshService.execute(machine, command);
             output.append("STDOUT:\n").append(result.getStdout());
             if (result.getStderr() != null && !result.getStderr().isBlank()) {
                 output.append("\nSTDERR:\n").append(result.getStderr());

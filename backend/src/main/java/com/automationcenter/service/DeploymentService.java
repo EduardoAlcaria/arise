@@ -94,8 +94,7 @@ public class DeploymentService {
             }
 
             // Detect target OS (Windows cmd.exe won't recognise 'uname')
-            var osCheck = sshService.execute(machine.getHost(), machine.getPort(),
-                    machine.getSshUser(), machine.getPrivateKey(), "uname -s 2>/dev/null || echo Windows");
+            var osCheck = sshService.execute(machine, "uname -s 2>/dev/null || echo Windows");
             boolean isWindows = osCheck.getStdout().trim().equalsIgnoreCase("windows")
                     || osCheck.getExitCode() != 0;
             appendLog(deployment, "Target OS: " + (isWindows ? "Windows" : osCheck.getStdout().trim()), LogLevel.INFO);
@@ -118,9 +117,7 @@ public class DeploymentService {
                     ? "rmdir /s /q \"" + repoDir + "\" 2>nul & git clone " + cloneUrl + " -b " + deployment.getBranch() + " \"" + repoDir + "\""
                     : "rm -rf " + repoDir + " && git clone " + cloneUrl + " -b " + deployment.getBranch() + " " + repoDir;
             appendLog(deployment, "Cloning repository: " + deployment.getRepositoryUrl(), LogLevel.INFO);
-            var cloneResult = sshService.execute(
-                    machine.getHost(), machine.getPort(), machine.getSshUser(), machine.getPrivateKey(), cloneCmd
-            );
+            var cloneResult = sshService.execute(machine, cloneCmd);
             appendLog(deployment, cloneResult.getStdout(), LogLevel.INFO);
             if (cloneResult.getExitCode() != 0) {
                 appendLog(deployment, "Clone failed: " + cloneResult.getStderr(), LogLevel.ERROR);
@@ -140,9 +137,7 @@ public class DeploymentService {
             String buildCmd = getBuildCommand(stack, repoDir, isWindows);
             if (!buildCmd.isEmpty()) {
                 appendLog(deployment, "Running build: " + buildCmd, LogLevel.INFO);
-                var buildResult = sshService.execute(
-                        machine.getHost(), machine.getPort(), machine.getSshUser(), machine.getPrivateKey(), buildCmd
-                );
+                var buildResult = sshService.execute(machine, buildCmd);
                 appendLog(deployment, buildResult.getStdout(), LogLevel.INFO);
                 if (buildResult.getExitCode() != 0) {
                     appendLog(deployment, "Build failed: " + buildResult.getStderr(), LogLevel.ERROR);
@@ -166,7 +161,7 @@ public class DeploymentService {
                     String cfCmd = "docker rm -f cloudflared_" + deploymentId + " 2>/dev/null || true" +
                             " && docker run -d --name cloudflared_" + deploymentId +
                             " --network host cloudflare/cloudflared:latest tunnel run --token " + tunnelToken;
-                    sshService.execute(machine.getHost(), machine.getPort(), machine.getSshUser(), machine.getPrivateKey(), cfCmd);
+                    sshService.execute(machine, cfCmd);
                     deployment.setCloudfareTunnelId(tunnel.getId());
                     deployment.setCloudfareTunnelUrl("https://" + deployment.getTunnelHostname());
                     appendLog(deployment, "Tunnel active: https://" + deployment.getTunnelHostname(), LogLevel.INFO);
@@ -205,8 +200,7 @@ public class DeploymentService {
             fixDockerCredentials(deployment, machine, false);
 
             String baseDir = "/apps/" + deployment.getId();
-            var mkdirResult = sshService.execute(machine.getHost(), machine.getPort(),
-                    machine.getSshUser(), machine.getPrivateKey(), "mkdir -p " + baseDir);
+            var mkdirResult = sshService.execute(machine, "mkdir -p " + baseDir);
             if (mkdirResult.getExitCode() != 0) {
                 appendLog(deployment, "Failed to create app dir: " + mkdirResult.getStderr(), LogLevel.ERROR);
                 fail(deployment);
@@ -223,8 +217,7 @@ public class DeploymentService {
                 String branch = service.getBranch() != null ? service.getBranch() : "main";
                 String cloneCmd = "rm -rf " + serviceDir + " && git clone " + repoUrl + " -b " + branch + " " + serviceDir;
                 appendLog(deployment, "Cloning service " + service.getName(), LogLevel.INFO);
-                var cloneResult = sshService.execute(machine.getHost(), machine.getPort(),
-                        machine.getSshUser(), machine.getPrivateKey(), cloneCmd);
+                var cloneResult = sshService.execute(machine, cloneCmd);
                 appendLog(deployment, cloneResult.getStdout(), LogLevel.INFO);
                 if (cloneResult.getExitCode() != 0) {
                     appendLog(deployment, "Clone failed for " + service.getName() + ": " + cloneResult.getStderr(), LogLevel.ERROR);
@@ -236,8 +229,7 @@ public class DeploymentService {
             for (ConfigFileDto cfg : configFiles) {
                 String filePath = baseDir + "/" + cfg.getPath();
                 appendLog(deployment, "Writing config: " + cfg.getPath(), LogLevel.INFO);
-                var writeResult = sshService.writeFileViaShell(machine.getHost(), machine.getPort(),
-                        machine.getSshUser(), machine.getPrivateKey(), filePath, cfg.getContent());
+                var writeResult = sshService.writeFileViaShell(machine, filePath, cfg.getContent());
                 if (writeResult.getExitCode() != 0) {
                     appendLog(deployment, "Failed to write " + cfg.getPath() + ": " + writeResult.getStderr(), LogLevel.ERROR);
                     fail(deployment);
@@ -250,8 +242,7 @@ public class DeploymentService {
 
             String composeCmd = "cd " + baseDir + " && docker compose up --build -d 2>&1";
             appendLog(deployment, "Running docker compose up --build -d", LogLevel.INFO);
-            var composeResult = sshService.execute(machine.getHost(), machine.getPort(),
-                    machine.getSshUser(), machine.getPrivateKey(), composeCmd);
+            var composeResult = sshService.execute(machine, composeCmd);
             appendLog(deployment, composeResult.getStdout(), LogLevel.INFO);
             if (composeResult.getExitCode() != 0) {
                 appendLog(deployment, "docker compose failed: " + composeResult.getStderr(), LogLevel.ERROR);
@@ -282,8 +273,7 @@ public class DeploymentService {
                             " && docker run -d --name cloudflared_" + deployment.getId() +
                             " --network host cloudflare/cloudflared:latest" +
                             " tunnel run --token " + tunnelToken;
-                    sshService.execute(machine.getHost(), machine.getPort(),
-                            machine.getSshUser(), machine.getPrivateKey(), cfCmd);
+                    sshService.execute(machine, cfCmd);
                     deployment.setCloudfareTunnelId(tunnel.getId());
                     deployment.setCloudfareTunnelUrl("https://" + deployment.getTunnelHostname());
                     appendLog(deployment, "Tunnel active: https://" + deployment.getTunnelHostname(), LogLevel.INFO);
@@ -334,7 +324,7 @@ public class DeploymentService {
             String cfCmd = "docker rm -f cloudflared_" + deploymentId + " 2>/dev/null || true" +
                     " && docker run -d --name cloudflared_" + deploymentId +
                     " --network host cloudflare/cloudflared:latest tunnel run --token " + tunnelToken;
-            sshService.execute(machine.getHost(), machine.getPort(), machine.getSshUser(), machine.getPrivateKey(), cfCmd);
+            sshService.execute(machine, cfCmd);
             deployment.setTunnelName(tunnelName);
             deployment.setTunnelHostname(tunnelHostname);
             deployment.setTunnelAppPort(tunnelAppPort);
@@ -382,8 +372,7 @@ public class DeploymentService {
         String listCmd = isWindows
                 ? "dir /b \"" + repoDir + "\""
                 : "ls " + repoDir;
-        var listResult = sshService.execute(machine.getHost(), machine.getPort(),
-                machine.getSshUser(), machine.getPrivateKey(), listCmd);
+        var listResult = sshService.execute(machine, listCmd);
         String files = listResult.getStdout().toLowerCase();
         if (files.contains("docker-compose.yml") || files.contains("docker-compose.yaml")) return "compose";
         if (files.contains("dockerfile"))  return "docker";
@@ -418,7 +407,7 @@ public class DeploymentService {
                     : "python3 -c 'import json,os; p=os.path.join(os.path.expanduser(\"~\"),\".docker\",\"config.json\"); " +
                       "d=json.load(open(p)) if os.path.exists(p) else {}; " +
                       "d.pop(\"credsStore\",None); open(p,\"w\").write(json.dumps(d,indent=2))' 2>/dev/null; true";
-            sshService.execute(machine.getHost(), machine.getPort(), machine.getSshUser(), machine.getPrivateKey(), cmd);
+            sshService.execute(machine, cmd);
             appendLog(deployment, "Docker credential store configured", LogLevel.INFO);
         } catch (Exception e) {
             log.debug("Docker credentials pre-flight skipped: {}", e.getMessage());
