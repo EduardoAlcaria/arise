@@ -30,6 +30,9 @@ public class Machine {
     @Column(columnDefinition = "TEXT", nullable = false)
     private String privateKey;
 
+    @Column(columnDefinition = "TEXT")
+    private String proxyCommand;
+
     @Enumerated(EnumType.STRING)
     @Builder.Default
     private MachineStatus status = MachineStatus.UNKNOWN;

@@ -14,6 +14,7 @@ public class MachineResponse {
     private Integer port;
     private String sshUser;
     private String status;
+    private String proxyCommand;
     private LocalDateTime lastSeen;
     private LocalDateTime createdAt;
     private Long ownerId;
