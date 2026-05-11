@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { getTopology } from '../api/topology'
 import {
   ReactFlow, Background, BackgroundVariant, Controls, MiniMap, Panel,
+  Handle, Position,
   useNodesState, useEdgesState,
   type Node, type Edge, MarkerType,
 } from '@xyflow/react'
@@ -31,17 +32,17 @@ function applyDagreLayout(nodes: Node[], edges: Edge[]): Node[] {
 // ── Color helpers ─────────────────────────────────────────────────────────────
 
 function nodeColor(status: string): string {
-  if (['ONLINE', 'SUCCESS', 'RUNNING', 'ACTIVE'].includes(status)) return 'oklch(0.78 0.16 155)'
-  if (['FAILED', 'ERROR', 'OFFLINE'].includes(status)) return 'oklch(0.65 0.22 25)'
-  if (['BUILDING', 'DEPLOYING', 'PENDING', 'STARTING'].includes(status)) return 'oklch(0.78 0.16 55)'
-  return 'oklch(0.45 0 0)'
+  if (['ONLINE', 'SUCCESS', 'RUNNING', 'ACTIVE'].includes(status)) return '#4ade80'
+  if (['FAILED', 'ERROR', 'OFFLINE'].includes(status)) return '#f87171'
+  if (['BUILDING', 'DEPLOYING', 'PENDING', 'STARTING'].includes(status)) return '#facc15'
+  return '#6b7280'
 }
 
-function edgeColor(label: string): string {
-  if (label === 'exposes') return 'oklch(0.78 0.16 155)'
-  if (label === 'deployed on') return 'oklch(0.6 0.12 250)'
-  if (label === 'hosts') return 'oklch(0.6 0.12 280)'
-  return 'oklch(0.4 0 0)'
+function edgeStroke(label: string): string {
+  if (label === 'exposes') return '#4ade80'
+  if (label === 'deployed on') return '#60a5fa'
+  if (label === 'hosts') return '#a78bfa'
+  return '#475569'
 }
 
 function nodeIcon(type: string) {
@@ -57,37 +58,49 @@ function TopologyNodeCard({ data, selected }: { data: any; selected?: boolean })
   const Icon = nodeIcon(data.type)
   const color = nodeColor(data.status)
   return (
-    <div style={{
-      background: 'var(--color-card)',
-      border: `1.5px solid ${selected ? color : color + '55'}`,
-      borderRadius: 10,
-      padding: '10px 14px',
-      minWidth: NODE_WIDTH - 20,
-      boxShadow: selected
-        ? `0 0 0 2px ${color}44, 0 4px 16px ${color}22`
-        : `0 1px 4px rgba(0,0,0,0.2)`,
-      opacity: data.dimmed ? 0.2 : 1,
-      transition: 'opacity 0.2s, box-shadow 0.2s, border-color 0.2s',
-    }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-        <Icon size={14} style={{ color, flexShrink: 0 }} />
-        <span style={{
-          fontSize: 12, fontWeight: 600, color: 'var(--color-foreground)',
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        }}>
-          {data.label}
-        </span>
+    <>
+      <Handle
+        type="target"
+        position={Position.Top}
+        style={{ background: color, border: 'none', width: 8, height: 8 }}
+      />
+      <div style={{
+        background: '#1e293b',
+        border: `1.5px solid ${selected ? color : color + '40'}`,
+        borderRadius: 10,
+        padding: '10px 14px',
+        minWidth: NODE_WIDTH - 20,
+        boxShadow: selected
+          ? `0 0 0 2px ${color}33, 0 4px 16px ${color}22`
+          : '0 1px 4px rgba(0,0,0,0.4)',
+        opacity: data.dimmed ? 0.2 : 1,
+        transition: 'opacity 0.2s, box-shadow 0.2s, border-color 0.2s',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+          <Icon size={14} style={{ color, flexShrink: 0 }} />
+          <span style={{
+            fontSize: 12, fontWeight: 600, color: '#f1f5f9',
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          }}>
+            {data.label}
+          </span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <div style={{ width: 6, height: 6, borderRadius: '50%', background: color, flexShrink: 0 }} />
+          <span style={{
+            fontSize: 10, color: '#94a3b8',
+            textTransform: 'uppercase', letterSpacing: '0.05em',
+          }}>
+            {data.type} · {data.status?.toLowerCase()}
+          </span>
+        </div>
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <div style={{ width: 6, height: 6, borderRadius: '50%', background: color, flexShrink: 0 }} />
-        <span style={{
-          fontSize: 10, color: 'var(--color-muted-foreground)',
-          textTransform: 'uppercase', letterSpacing: '0.05em',
-        }}>
-          {data.type} · {data.status?.toLowerCase()}
-        </span>
-      </div>
-    </div>
+      <Handle
+        type="source"
+        position={Position.Bottom}
+        style={{ background: color, border: 'none', width: 8, height: 8 }}
+      />
+    </>
   )
 }
 
@@ -100,38 +113,38 @@ function SidePanel({ node, onClose }: { node: any; onClose: () => void }) {
   return (
     <div style={{
       position: 'absolute', top: 16, right: 16, width: 280, zIndex: 10,
-      background: 'var(--color-card)', border: '1px solid var(--color-border)',
-      borderRadius: 12, padding: 16, boxShadow: '0 4px 24px rgba(0,0,0,0.35)',
+      background: '#1e293b', border: '1px solid #334155',
+      borderRadius: 12, padding: 16, boxShadow: '0 4px 24px rgba(0,0,0,0.5)',
     }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-        <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--color-foreground)' }}>{node.data.label}</span>
+        <span style={{ fontWeight: 600, fontSize: 13, color: '#f1f5f9' }}>{node.data.label}</span>
         <button onClick={onClose} style={{
-          color: 'var(--color-muted-foreground)', background: 'none',
-          border: 'none', cursor: 'pointer', fontSize: 16, lineHeight: 1,
+          color: '#94a3b8', background: 'none', border: 'none',
+          cursor: 'pointer', fontSize: 16, lineHeight: 1,
         }}>✕</button>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {Object.entries(meta).map(([k, v]) => (
           <div key={k} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             <span style={{
-              fontSize: 10, fontWeight: 600, color: 'var(--color-muted-foreground)',
+              fontSize: 10, fontWeight: 600, color: '#64748b',
               textTransform: 'uppercase', letterSpacing: '0.05em',
             }}>{k}</span>
             <span style={{
-              fontSize: 12, color: 'var(--color-foreground)',
+              fontSize: 12, color: '#e2e8f0',
               fontFamily: 'monospace', wordBreak: 'break-all',
             }}>{String(v)}</span>
           </div>
         ))}
         {meta.tunnelUrl && (
           <a href={String(meta.tunnelUrl)} target="_blank" rel="noreferrer"
-            style={{ fontSize: 12, color: 'var(--color-primary)', textDecoration: 'underline', marginTop: 4 }}>
+            style={{ fontSize: 12, color: '#60a5fa', textDecoration: 'underline', marginTop: 4 }}>
             Open tunnel ↗
           </a>
         )}
         {meta.url && (
           <a href={String(meta.url)} target="_blank" rel="noreferrer"
-            style={{ fontSize: 12, color: 'var(--color-primary)', textDecoration: 'underline', marginTop: 4 }}>
+            style={{ fontSize: 12, color: '#60a5fa', textDecoration: 'underline', marginTop: 4 }}>
             Open ↗
           </a>
         )}
@@ -173,8 +186,8 @@ export default function Topology() {
     if (!data) return
 
     const q = search.trim().toLowerCase()
+    const typeOf = new Map(data.nodes.map(n => [n.id, n.type]))
 
-    // IDs that directly match the search query
     const matchingIds = new Set(
       data.nodes
         .filter(n => !hiddenTypes.has(n.type))
@@ -182,7 +195,6 @@ export default function Topology() {
         .map(n => n.id),
     )
 
-    // When searching, also reveal direct neighbors of matching nodes
     const visibleIds = new Set(matchingIds)
     if (q) {
       data.edges.forEach(e => {
@@ -190,8 +202,6 @@ export default function Topology() {
         if (matchingIds.has(e.target)) visibleIds.add(e.source)
       })
     }
-
-    const typeOf = new Map(data.nodes.map(n => [n.id, n.type]))
 
     const layoutNodes: Node[] = data.nodes
       .filter(n => !hiddenTypes.has(n.type))
@@ -214,7 +224,7 @@ export default function Topology() {
         !hiddenTypes.has(typeOf.get(e.target) ?? ''),
       )
       .map((e, i) => {
-        const color = edgeColor(e.label)
+        const stroke = edgeStroke(e.label)
         const active = !q || (visibleIds.has(e.source) && visibleIds.has(e.target))
         return {
           id: `e-${i}`,
@@ -223,10 +233,10 @@ export default function Topology() {
           label: e.label,
           type: 'smoothstep',
           animated: e.label === 'exposes',
-          markerEnd: { type: MarkerType.ArrowClosed, color },
-          style: { stroke: color, strokeWidth: 1.5, opacity: active ? 1 : 0.08 },
-          labelStyle: { fontSize: 10, fill: 'var(--color-muted-foreground)' },
-          labelBgStyle: { fill: 'var(--color-card)', fillOpacity: 0.9 },
+          markerEnd: { type: MarkerType.ArrowClosed, color: stroke },
+          style: { stroke, strokeWidth: 1.5, opacity: active ? 1 : 0.08 },
+          labelStyle: { fontSize: 10, fill: '#94a3b8' },
+          labelBgStyle: { fill: '#1e293b', fillOpacity: 0.9 },
           labelBgPadding: [4, 3] as [number, number],
           labelBgBorderRadius: 3,
         }
@@ -265,7 +275,7 @@ export default function Topology() {
   )
 
   return (
-    <div style={{ width: '100%', height: '100%', position: 'relative' }}>
+    <div style={{ width: '100%', height: '100%', position: 'relative', background: '#0f172a' }}>
       <ReactFlow
         nodes={rfNodes}
         edges={rfEdges}
@@ -277,22 +287,32 @@ export default function Topology() {
         fitView
         fitViewOptions={{ padding: 0.25 }}
         minZoom={0.1}
+        style={{ background: 'transparent' }}
       >
-        <Background variant={BackgroundVariant.Dots} color="var(--color-border)" gap={20} size={1.5} />
-        <Controls />
-        <MiniMap nodeStrokeWidth={3} pannable zoomable style={{ background: 'var(--color-card)' }} />
+        <Background
+          variant={BackgroundVariant.Dots}
+          gap={24}
+          size={1.5}
+          color="#1e3a5f"
+        />
+        <Controls style={{ background: '#1e293b', border: '1px solid #334155' }} />
+        <MiniMap
+          nodeStrokeWidth={3}
+          pannable
+          zoomable
+          style={{ background: '#1e293b', border: '1px solid #334155' }}
+        />
 
         <Panel position="top-left">
           <div style={{
             display: 'flex', flexDirection: 'column', gap: 8,
-            background: 'var(--color-card)', border: '1px solid var(--color-border)',
+            background: '#1e293b', border: '1px solid #334155',
             borderRadius: 10, padding: '10px 12px', minWidth: 230,
-            boxShadow: '0 2px 12px rgba(0,0,0,0.25)',
+            boxShadow: '0 2px 16px rgba(0,0,0,0.5)',
           }}>
             <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
               <Search size={13} style={{
-                position: 'absolute', left: 8,
-                color: 'var(--color-muted-foreground)', pointerEvents: 'none',
+                position: 'absolute', left: 8, color: '#64748b', pointerEvents: 'none',
               }} />
               <input
                 value={search}
@@ -300,8 +320,8 @@ export default function Topology() {
                 placeholder="Search nodes…"
                 style={{
                   width: '100%', padding: '5px 28px 5px 26px',
-                  background: 'var(--color-background)', border: '1px solid var(--color-border)',
-                  borderRadius: 6, fontSize: 12, color: 'var(--color-foreground)', outline: 'none',
+                  background: '#0f172a', border: '1px solid #334155',
+                  borderRadius: 6, fontSize: 12, color: '#f1f5f9', outline: 'none',
                 }}
               />
               {search && (
@@ -309,8 +329,7 @@ export default function Topology() {
                   onClick={() => setSearch('')}
                   style={{
                     position: 'absolute', right: 6, background: 'none', border: 'none',
-                    cursor: 'pointer', color: 'var(--color-muted-foreground)',
-                    display: 'flex', alignItems: 'center',
+                    cursor: 'pointer', color: '#64748b', display: 'flex', alignItems: 'center',
                   }}
                 >
                   <X size={12} />
@@ -330,9 +349,9 @@ export default function Topology() {
                       style={{
                         display: 'flex', alignItems: 'center', gap: 4,
                         padding: '3px 8px', borderRadius: 20, fontSize: 11, fontWeight: 500,
-                        border: '1px solid var(--color-border)',
-                        background: active ? 'var(--color-primary)' : 'transparent',
-                        color: active ? 'var(--color-primary-foreground)' : 'var(--color-muted-foreground)',
+                        border: '1px solid #334155',
+                        background: active ? '#3b82f6' : 'transparent',
+                        color: active ? '#fff' : '#64748b',
                         cursor: 'pointer', transition: 'all 0.15s',
                       }}
                     >
