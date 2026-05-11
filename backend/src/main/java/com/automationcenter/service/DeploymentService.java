@@ -312,8 +312,7 @@ public class DeploymentService {
 
     public DeploymentResponse redeploy(Long sourceId, Long ownerId) {
         Deployment source = findByIdAndOwner(sourceId, ownerId);
-        User owner = userRepository.findById(ownerId)
-                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+        User owner = userRepository.findById(ownerId).orElseThrow();
         Machine machine = source.getMachine();
 
         Deployment.DeploymentBuilder builder = Deployment.builder()
