@@ -1,5 +1,6 @@
 package com.automationcenter.dto.machine;
 
+import com.automationcenter.entity.TunnelType;
 import lombok.Builder;
 import lombok.Data;
 
@@ -14,6 +15,7 @@ public class MachineResponse {
     private Integer port;
     private String sshUser;
     private String status;
+    private TunnelType tunnelType;
     private String proxyCommand;
     private LocalDateTime lastSeen;
     private LocalDateTime createdAt;
