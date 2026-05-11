@@ -4,6 +4,7 @@ import com.automationcenter.entity.*;
 import com.automationcenter.repository.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.*;
 
@@ -19,6 +20,7 @@ public class TopologyService {
     public record TopologyEdge(String source, String target, String label) {}
     public record TopologyGraph(List<TopologyNode> nodes, List<TopologyEdge> edges) {}
 
+    @Transactional(readOnly = true)
     public TopologyGraph buildGraph(Long ownerId) {
         List<TopologyNode> nodes = new ArrayList<>();
         List<TopologyEdge> edges = new ArrayList<>();
@@ -41,7 +43,7 @@ public class TopologyService {
         // Sort newest-first
         allDeps.sort(Comparator.comparing(Deployment::getCreatedAt).reversed());
         for (Deployment d : allDeps) {
-            String key = d.getRepositoryUrl() != null ? d.getRepositoryUrl() : "deploy-" + d.getId();
+            String key = d.getRepositoryUrl() != null ? d.getRepositoryUrl() : "app-" + d.getName();
             latestByRepo.putIfAbsent(key, d);
         }
         for (Deployment d : latestByRepo.values()) {
