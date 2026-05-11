@@ -6,8 +6,6 @@ import com.automationcenter.exception.ResourceNotFoundException;
 import com.automationcenter.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.kohsuke.github.GitHub;
-import org.kohsuke.github.GitHubBuilder;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
@@ -29,16 +27,34 @@ public class CicdService {
     private final UserRepository userRepository;
     private final WebClient.Builder webClientBuilder;
 
+    @SuppressWarnings("unchecked")
     public List<String> detectWorkflows(Long userId, String owner, String repo) {
+        User user = getUser(userId);
         try {
-            String branch = getDefaultBranch(userId, owner, repo);
-            return gitHubService.getTree(userId, owner, repo, branch)
-                    .stream()
-                    .filter(item -> item.getPath().startsWith(".github/workflows/")
-                            && "blob".equals(item.getType())
-                            && (item.getPath().endsWith(".yml") || item.getPath().endsWith(".yaml")))
-                    .map(item -> item.getPath().substring(".github/workflows/".length()))
+            // Use the Contents API directly — more reliable than full-tree scan
+            List<Map<String, Object>> items = webClientBuilder.build()
+                    .get()
+                    .uri("https://api.github.com/repos/{owner}/{repo}/contents/.github/workflows",
+                            owner, repo)
+                    .header("Authorization", "token " + user.getGithubToken())
+                    .header("Accept", "application/vnd.github+json")
+                    .retrieve()
+                    .bodyToMono(List.class)
+                    .block();
+
+            if (items == null) return List.of();
+            return items.stream()
+                    .filter(item -> "file".equals(item.get("type")))
+                    .map(item -> (String) item.get("name"))
+                    .filter(name -> name != null && (name.endsWith(".yml") || name.endsWith(".yaml")))
                     .toList();
+        } catch (WebClientResponseException e) {
+            if (e.getStatusCode().value() == 404) {
+                log.debug("No .github/workflows/ directory in {}/{}", owner, repo);
+            } else {
+                log.error("Could not detect workflows for {}/{}: HTTP {}", owner, repo, e.getStatusCode().value());
+            }
+            return List.of();
         } catch (Exception e) {
             log.error("Could not detect workflows for {}/{}: {}", owner, repo, e.getMessage());
             return List.of();
@@ -281,17 +297,6 @@ public class CicdService {
         } catch (Exception e) {
             log.error("Could not fetch workflow runs for {}/{}: {}", owner, repo, e.getMessage());
             return List.of();
-        }
-    }
-
-    private String getDefaultBranch(Long userId, String owner, String repo) {
-        User user = getUser(userId);
-        try {
-            GitHub github = new GitHubBuilder().withOAuthToken(user.getGithubToken()).build();
-            return github.getRepository(owner + "/" + repo).getDefaultBranch();
-        } catch (Exception e) {
-            log.warn("Could not get default branch for {}/{}, falling back to 'main': {}", owner, repo, e.getMessage());
-            return "main";
         }
     }
 
