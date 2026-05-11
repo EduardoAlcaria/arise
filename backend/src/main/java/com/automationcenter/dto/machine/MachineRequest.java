@@ -1,5 +1,6 @@
 package com.automationcenter.dto.machine;
 
+import com.automationcenter.entity.TunnelType;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
@@ -16,7 +17,7 @@ public class MachineRequest {
     private Integer port;
     @NotBlank
     private String sshUser;
-    @NotBlank
-    private String privateKey;
-    private String proxyCommand; // optional — null means direct TCP connection
+    private String privateKey;       // required on create, optional on update (blank = keep existing)
+    private TunnelType tunnelType;   // null → DIRECT
+    private String proxyCommand;     // only used when tunnelType = PROXY_COMMAND
 }
