@@ -351,6 +351,36 @@ public class DeploymentService {
         return toResponse(deploymentRepository.save(deployment));
     }
 
+    public DeploymentResponse redeploy(Long sourceId, Long ownerId) {
+        Deployment source = findByIdAndOwner(sourceId, ownerId);
+        User owner = userRepository.findById(ownerId).orElseThrow();
+        Machine machine = source.getMachine();
+
+        Deployment.DeploymentBuilder builder = Deployment.builder()
+                .name(source.getName())
+                .type(source.getType())
+                .repositoryUrl(source.getRepositoryUrl())
+                .branch(source.getBranch())
+                .version(source.getVersion())
+                .machine(machine)
+                .owner(owner);
+
+        // Carry over stored configs (APPLICATION type)
+        if (source.getApplicationServices() != null)
+            builder.applicationServices(source.getApplicationServices());
+        if (source.getApplicationConfigs() != null)
+            builder.applicationConfigs(source.getApplicationConfigs());
+        // Carry over tunnel config
+        if (source.getTunnelName() != null)
+            builder.tunnelName(source.getTunnelName())
+                   .tunnelHostname(source.getTunnelHostname())
+                   .tunnelAppPort(source.getTunnelAppPort());
+
+        Deployment deployment = deploymentRepository.save(builder.build());
+        executeAsync(deployment.getId());
+        return toResponse(deployment);
+    }
+
     public DeploymentResponse addTunnel(Long deploymentId, Long ownerId, String tunnelName, String tunnelHostname, int tunnelAppPort) {
         Deployment deployment = findByIdAndOwner(deploymentId, ownerId);
         Machine machine = deployment.getMachine();
