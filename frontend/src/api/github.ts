@@ -15,7 +15,7 @@ export const getRepoReadme = (owner: string, repo: string) =>
   client.get<{content: string}>(`/github/repos/${owner}/${repo}/readme`).then(r => r.data)
 
 export const getRepoTree = (owner: string, repo: string, branch: string) =>
-  client.get<{tree: Array<{path: string; type: string; size?: number}>}>(`/github/repos/${owner}/${repo}/tree`, { params: { branch } }).then(r => r.data)
+  client.get<Array<{path: string; type: string; size?: number}>>(`/github/repos/${owner}/${repo}/tree`, { params: { branch } }).then(r => r.data)
 
 export const getRepoEnvVars = (owner: string, repo: string, branch: string) =>
   client.get<{vars: string[]}>(`/github/repos/${owner}/${repo}/envvars`, { params: { branch } }).then(r => r.data)
