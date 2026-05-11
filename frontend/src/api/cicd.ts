@@ -51,5 +51,8 @@ export const listRunners = (owner: string, repo: string) =>
 export const deleteRunner = (owner: string, repo: string, runnerId: number) =>
   client.delete(`/cicd/runners/${owner}/${repo}/${runnerId}`)
 
+export const triggerByPush = (owner: string, repo: string, ref: string) =>
+  client.post(`/cicd/push/${owner}/${repo}`, null, { params: { ref } })
+
 export const setupRunner = (owner: string, repo: string, machineId: number) =>
   client.post(`/cicd/runner/${owner}/${repo}/setup`, null, { params: { machineId } })
