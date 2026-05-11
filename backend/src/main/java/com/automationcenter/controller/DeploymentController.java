@@ -58,6 +58,13 @@ public class DeploymentController {
         return ResponseEntity.ok(deploymentService.rollback(id, user.getId()));
     }
 
+    @PostMapping("/{id}/redeploy")
+    public ResponseEntity<DeploymentResponse> redeploy(
+            @PathVariable Long id,
+            @AuthenticationPrincipal User user) {
+        return ResponseEntity.ok(deploymentService.redeploy(id, user.getId()));
+    }
+
     @PostMapping("/{id}/tunnel")
     public ResponseEntity<DeploymentResponse> addTunnel(
             @PathVariable Long id,
