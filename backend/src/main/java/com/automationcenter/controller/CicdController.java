@@ -43,4 +43,52 @@ public class CicdController {
             @AuthenticationPrincipal User user) {
         return ResponseEntity.ok(cicdService.getWorkflowRuns(user.getId(), owner, repo));
     }
+
+    @PostMapping("/runs/{owner}/{repo}/{runId}/rerun")
+    public ResponseEntity<Void> rerunWorkflow(
+            @PathVariable String owner,
+            @PathVariable String repo,
+            @PathVariable Long runId,
+            @AuthenticationPrincipal User user) {
+        cicdService.rerunWorkflow(user.getId(), owner, repo, runId);
+        return ResponseEntity.noContent().build();
+    }
+
+    @PostMapping("/workflows/{owner}/{repo}/{workflowId}/dispatch")
+    public ResponseEntity<Void> triggerWorkflow(
+            @PathVariable String owner,
+            @PathVariable String repo,
+            @PathVariable String workflowId,
+            @RequestParam(defaultValue = "main") String ref,
+            @AuthenticationPrincipal User user) {
+        cicdService.triggerWorkflow(user.getId(), owner, repo, workflowId, ref);
+        return ResponseEntity.noContent().build();
+    }
+
+    @GetMapping("/jobs/{owner}/{repo}/{runId}")
+    public ResponseEntity<List<Map<String, Object>>> getWorkflowJobs(
+            @PathVariable String owner,
+            @PathVariable String repo,
+            @PathVariable Long runId,
+            @AuthenticationPrincipal User user) {
+        return ResponseEntity.ok(cicdService.getWorkflowJobs(user.getId(), owner, repo, runId));
+    }
+
+    @GetMapping("/runners/{owner}/{repo}")
+    public ResponseEntity<List<Map<String, Object>>> listRunners(
+            @PathVariable String owner,
+            @PathVariable String repo,
+            @AuthenticationPrincipal User user) {
+        return ResponseEntity.ok(cicdService.listRunners(user.getId(), owner, repo));
+    }
+
+    @DeleteMapping("/runners/{owner}/{repo}/{runnerId}")
+    public ResponseEntity<Void> deleteRunner(
+            @PathVariable String owner,
+            @PathVariable String repo,
+            @PathVariable Long runnerId,
+            @AuthenticationPrincipal User user) {
+        cicdService.deleteRunner(user.getId(), owner, repo, runnerId);
+        return ResponseEntity.noContent().build();
+    }
 }

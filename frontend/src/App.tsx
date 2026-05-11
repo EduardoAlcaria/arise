@@ -12,6 +12,7 @@ import GitHub from './pages/GitHub'
 import Cloudflare from './pages/Cloudflare'
 import Settings from './pages/Settings'
 import Topology from './pages/Topology'
+import CiCd from './pages/CiCd'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -39,6 +40,7 @@ export default function App() {
             <Route path="containers" element={<Containers />} />
             <Route path="deployments" element={<Deployments />} />
             <Route path="topology" element={<Topology />} />
+            <Route path="cicd" element={<CiCd />} />
             <Route path="github" element={<GitHub />} />
             <Route path="cloudflare" element={<Cloudflare />} />
             <Route path="settings" element={<Settings />} />
