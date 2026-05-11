@@ -73,7 +73,9 @@ public class SshService {
     /** Write a file to the remote machine by base64-encoding content through a shell command. */
     public SshCommandResponse writeFileViaShell(Machine machine, String remotePath, String content) {
         String b64 = Base64.getEncoder().encodeToString(content.getBytes(StandardCharsets.UTF_8));
-        String cmd = "mkdir -p \"$(dirname '" + remotePath + "')\" && echo '" + b64 + "' | base64 -d > '" + remotePath + "'";
+        // Escape single quotes in path to prevent shell injection
+        String safePath = remotePath.replace("'", "'\\''");
+        String cmd = "mkdir -p \"$(dirname '" + safePath + "')\" && echo '" + b64 + "' | base64 -d > '" + safePath + "'";
         return execute(machine, cmd);
     }
 }
