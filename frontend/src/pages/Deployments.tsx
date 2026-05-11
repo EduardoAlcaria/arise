@@ -1,10 +1,10 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { getDeployments, createDeployment, rollbackDeployment, getDeploymentLogs, addDeploymentTunnel } from '../api/deployments'
+import { getDeployments, createDeployment, rollbackDeployment, redeployDeployment, getDeploymentLogs, addDeploymentTunnel } from '../api/deployments'
 import type { Deployment } from '../types'
 import { getMachines } from '../api/machines'
 import { getGitHubUser, type GHUser } from '../api/github'
-import { Plus, RotateCcw, FileText, X, Search, Rocket, ChevronDown, ChevronRight, Radio, Cloud, ExternalLink, AlertTriangle, Loader2 } from 'lucide-react'
+import { Plus, RotateCcw, RefreshCw, FileText, X, Search, Rocket, ChevronDown, ChevronRight, Radio, Cloud, ExternalLink, AlertTriangle, Loader2 } from 'lucide-react'
 import { StackIcon, StatusDot } from '../components/icons'
 import DeployRepoWizard, { type DeployItem, type AppDeployPayload } from '../components/DeployRepoWizard'
 import DeploymentWatcher from '../components/DeploymentWatcher'
@@ -116,6 +116,14 @@ export default function Deployments() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['deployments-all'] }),
   })
 
+  const redeployMut = useMutation({
+    mutationFn: redeployDeployment,
+    onSuccess: (dep) => {
+      qc.invalidateQueries({ queryKey: ['deployments-all'] })
+      setWatching({ id: dep.id, name: dep.name })
+    },
+  })
+
   const tunnelMut = useMutation({
     mutationFn: ({ id, name, hostname, port }: { id: number; name: string; hostname: string; port: number }) =>
       addDeploymentTunnel(id, name, hostname, port),
@@ -147,6 +155,7 @@ export default function Deployments() {
           name: item.name, type: 'REPOSITORY',
           repositoryUrl: item.repoUrl, branch: item.branch, machineId: item.machineId,
           tunnelName: item.tunnelName, tunnelHostname: item.tunnelHostname, tunnelAppPort: item.tunnelAppPort,
+          configFiles: item.configFiles,
         })
         if (!first) first = dep
       }
@@ -363,6 +372,16 @@ export default function Deployments() {
                                 className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-primary transition-colors"
                               >
                                 <Cloud size={13} />
+                              </button>
+                            )}
+                            {(run.status === 'SUCCESS' || run.status === 'FAILED') && (
+                              <button
+                                onClick={() => redeployMut.mutate(run.id)}
+                                title="Redeploy"
+                                disabled={redeployMut.isPending}
+                                className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-primary transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                <RefreshCw size={13} />
                               </button>
                             )}
                             {run.status === 'SUCCESS' && (
