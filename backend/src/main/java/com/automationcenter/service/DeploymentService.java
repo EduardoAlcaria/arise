@@ -37,6 +37,7 @@ public class DeploymentService {
     private final RabbitTemplate rabbitTemplate;
     private final ObjectMapper objectMapper;
     private final CloudflareService cloudflareService;
+    private final LogBroadcaster logBroadcaster;
 
     public DeploymentResponse create(DeploymentRequest request, Long ownerId) {
         User owner = userRepository.findById(ownerId)
@@ -65,6 +66,14 @@ public class DeploymentService {
                 builder.tunnelName(request.getTunnelName())
                         .tunnelHostname(request.getTunnelHostname())
                         .tunnelAppPort(request.getTunnelAppPort() != null ? request.getTunnelAppPort() : 80);
+            }
+        }
+
+        if (request.getType() == DeploymentType.REPOSITORY && request.getConfigFiles() != null && !request.getConfigFiles().isEmpty()) {
+            try {
+                builder.repoConfigs(objectMapper.writeValueAsString(request.getConfigFiles()));
+            } catch (Exception e) {
+                throw new RuntimeException("Failed to serialize repo config files", e);
             }
         }
 
@@ -125,14 +134,33 @@ public class DeploymentService {
                 return;
             }
 
-            deployment.setDeployDir(repoDir);
-            deploymentRepository.save(deployment);
-
-            if (!isWindows) {
-                var shaResult = sshService.execute(machine, "cd " + repoDir + " && git rev-parse HEAD 2>/dev/null || echo ''");
-                if (shaResult.getExitCode() == 0 && !shaResult.getStdout().isBlank()) {
-                    deployment.setResolvedCommitSha(shaResult.getStdout().trim());
-                    deploymentRepository.save(deployment);
+            if (deployment.getRepoConfigs() != null) {
+                if (!isWindows) {
+                    try {
+                        List<ConfigFileDto> cfgFiles = objectMapper.readValue(deployment.getRepoConfigs(), new TypeReference<>() {});
+                        for (ConfigFileDto cfg : cfgFiles) {
+                            // path traversal check
+                            String normalised = cfg.getPath().replace("\\", "/");
+                            if (normalised.contains("..")) {
+                                appendLog(deployment, "Skipping unsafe config path: " + cfg.getPath(), LogLevel.WARN);
+                                continue;
+                            }
+                            String filePath = repoDir + "/" + normalised;
+                            appendLog(deployment, "Writing config: " + cfg.getPath(), LogLevel.INFO);
+                            var writeResult = sshService.writeFileViaShell(machine, filePath, cfg.getContent());
+                            if (writeResult.getExitCode() != 0) {
+                                appendLog(deployment, "Failed to write " + cfg.getPath() + ": " + writeResult.getStderr(), LogLevel.ERROR);
+                                fail(deployment);
+                                return;
+                            }
+                        }
+                    } catch (Exception e) {
+                        appendLog(deployment, "Failed to parse config files: " + e.getMessage(), LogLevel.ERROR);
+                        fail(deployment);
+                        return;
+                    }
+                } else {
+                    appendLog(deployment, "Config file injection not supported for Windows targets — skipping", LogLevel.WARN);
                 }
             }
 
@@ -185,6 +213,7 @@ public class DeploymentService {
             deployment.setFinishedAt(LocalDateTime.now());
             deploymentRepository.save(deployment);
             appendLog(deployment, "Deployment completed successfully", LogLevel.INFO);
+            logBroadcaster.complete(deployment.getId());
 
             rabbitTemplate.convertAndSend(
                     RabbitMQConfig.DEPLOYMENT_EXCHANGE,
@@ -300,6 +329,7 @@ public class DeploymentService {
             deployment.setFinishedAt(LocalDateTime.now());
             deploymentRepository.save(deployment);
             appendLog(deployment, "Application deployed successfully", LogLevel.INFO);
+            logBroadcaster.complete(deployment.getId());
             rabbitTemplate.convertAndSend(RabbitMQConfig.DEPLOYMENT_EXCHANGE,
                     RabbitMQConfig.DEPLOYMENT_ROUTING_KEY, "DEPLOYMENT_SUCCESS:" + deployment.getId());
 
@@ -343,6 +373,36 @@ public class DeploymentService {
         deployment.setStatus(DeploymentStatus.ROLLED_BACK);
         deployment.setFinishedAt(LocalDateTime.now());
         deploymentRepository.save(deployment);
+        return toResponse(deployment);
+    }
+
+    public DeploymentResponse redeploy(Long sourceId, Long ownerId) {
+        Deployment source = findByIdAndOwner(sourceId, ownerId);
+        User owner = userRepository.findById(ownerId).orElseThrow();
+        Machine machine = source.getMachine();
+
+        Deployment.DeploymentBuilder builder = Deployment.builder()
+                .name(source.getName())
+                .type(source.getType())
+                .repositoryUrl(source.getRepositoryUrl())
+                .branch(source.getBranch())
+                .version(source.getVersion())
+                .machine(machine)
+                .owner(owner);
+
+        // Carry over stored configs (APPLICATION type)
+        if (source.getApplicationServices() != null)
+            builder.applicationServices(source.getApplicationServices());
+        if (source.getApplicationConfigs() != null)
+            builder.applicationConfigs(source.getApplicationConfigs());
+        // Carry over tunnel config
+        if (source.getTunnelName() != null)
+            builder.tunnelName(source.getTunnelName())
+                   .tunnelHostname(source.getTunnelHostname())
+                   .tunnelAppPort(source.getTunnelAppPort());
+
+        Deployment deployment = deploymentRepository.save(builder.build());
+        executeAsync(deployment.getId());
         return toResponse(deployment);
     }
 
@@ -392,6 +452,7 @@ public class DeploymentService {
                 RabbitMQConfig.DEPLOYMENT_ROUTING_KEY,
                 "DEPLOYMENT_FAILED:" + deployment.getId()
         );
+        logBroadcaster.complete(deployment.getId());
     }
 
     private void appendLog(Deployment deployment, String message, LogLevel level) {
@@ -400,6 +461,7 @@ public class DeploymentService {
         String existing = deployment.getLogs() == null ? "" : deployment.getLogs();
         deployment.setLogs(existing + "\n" + message);
         deploymentRepository.save(deployment);
+        logBroadcaster.publish(deployment.getId(), message);
     }
 
     private String detectStack(Machine machine, String repoDir, boolean isWindows) {

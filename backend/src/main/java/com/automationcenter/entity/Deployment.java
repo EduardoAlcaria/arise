@@ -43,6 +43,9 @@ public class Deployment {
     @Column(columnDefinition = "TEXT")
     private String applicationConfigs;
 
+    @Column(columnDefinition = "TEXT")
+    private String repoConfigs;
+
     private String tunnelName;
     private String tunnelHostname;
     private Integer tunnelAppPort;
