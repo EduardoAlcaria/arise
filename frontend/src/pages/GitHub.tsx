@@ -150,7 +150,7 @@ function RepoPanel({ repo, onClose, onDeploy }: RepoPanelProps) {
     retry: false,
   })
 
-  const treeNodes = treeData ? buildTree(treeData.tree) : []
+  const treeNodes = treeData ? buildTree(treeData) : []
   const langColor = repo.language ? (LANG_COLORS[repo.language] ?? '#888') : '#888'
 
   return (
@@ -220,7 +220,7 @@ function RepoPanel({ repo, onClose, onDeploy }: RepoPanelProps) {
                   <div key={i} className="h-3 rounded bg-muted" style={{ width: `${w}%` }} />
                 ))}
               </div>
-            ) : readmeData ? (
+            ) : readmeData?.content ? (
               <div
                 className="prose prose-sm prose-invert text-sm text-foreground leading-relaxed"
                 style={{ maxWidth: '100%' }}
@@ -287,6 +287,8 @@ export default function GitHub() {
   })
   const [showWizard, setShowWizard] = useState(false)
   const [search, setSearch] = useState('')
+  const [langFilter, setLangFilter] = useState('')
+  const [visFilter, setVisFilter] = useState<'all' | 'public' | 'private'>('all')
   const [selectedRepo, setSelectedRepo] = useState<GitHubRepo | null>(null)
   const [watching, setWatching] = useState<{ id: number; name: string } | null>(null)
   const [wizardInitialRepo, setWizardInitialRepo] = useState<{ repo: GitHubRepo; branch: string } | null>(null)
@@ -303,12 +305,22 @@ export default function GitHub() {
   const { data: machines } = useQuery({ queryKey: ['machines'], queryFn: getMachines })
   const deployMut = useMutation({ mutationFn: createDeployment })
 
-  const filtered = (repos ?? []).filter(r =>
-    !search ||
-    r.name.toLowerCase().includes(search.toLowerCase()) ||
-    (r.description ?? '').toLowerCase().includes(search.toLowerCase()) ||
-    (r.language ?? '').toLowerCase().includes(search.toLowerCase())
-  )
+  const languages = repos
+    ? [...new Set(repos.map(r => r.language).filter(Boolean) as string[])].sort()
+    : []
+
+  const filtered = (repos ?? []).filter(r => {
+    if (visFilter === 'public' && r.private) return false
+    if (visFilter === 'private' && !r.private) return false
+    if (langFilter && r.language !== langFilter) return false
+    if (search) {
+      const q = search.toLowerCase()
+      return r.name.toLowerCase().includes(q) ||
+        (r.description ?? '').toLowerCase().includes(q) ||
+        (r.language ?? '').toLowerCase().includes(q)
+    }
+    return true
+  })
 
   const handlePatValidated = (user: GHUser) => {
     setGhUser(user)
@@ -406,16 +418,44 @@ export default function GitHub() {
         </div>
       )}
 
-      {/* Search bar */}
-      <div className="relative mb-5">
-        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-        <input
-          className="input-field"
-          placeholder="Search repositories…"
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          style={{ paddingLeft: '36px' }}
-        />
+      {/* Search + filters */}
+      <div className="flex items-center gap-2 mb-5 flex-wrap">
+        <div className="relative flex-1 min-w-48">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <input
+            className="input-field w-full"
+            placeholder="Search repositories…"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            style={{ paddingLeft: '36px' }}
+          />
+        </div>
+        {languages.length > 0 && (
+          <select
+            value={langFilter}
+            onChange={e => setLangFilter(e.target.value)}
+            className="input-field"
+            style={{ width: 'auto', minWidth: '120px' }}
+          >
+            <option value="">All languages</option>
+            {languages.map(l => <option key={l} value={l}>{l}</option>)}
+          </select>
+        )}
+        <div className="flex rounded-lg border border-border overflow-hidden text-xs font-medium">
+          {(['all', 'public', 'private'] as const).map(v => (
+            <button
+              key={v}
+              onClick={() => setVisFilter(v)}
+              className="px-3 py-2 capitalize transition-colors"
+              style={{
+                background: visFilter === v ? 'var(--color-muted)' : 'transparent',
+                color: visFilter === v ? 'var(--color-foreground)' : 'var(--color-muted-foreground)',
+              }}
+            >
+              {v}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Repo grid */}
