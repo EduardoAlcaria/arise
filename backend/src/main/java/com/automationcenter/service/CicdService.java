@@ -44,6 +44,26 @@ public class CicdService {
         }
     }
 
+    private String fetchLatestRunnerVersion() {
+        try {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> release = webClientBuilder.build()
+                    .get()
+                    .uri("https://api.github.com/repos/actions/runner/releases/latest")
+                    .header("Accept", "application/vnd.github+json")
+                    .retrieve()
+                    .bodyToMono(Map.class)
+                    .block();
+            if (release != null) {
+                String tag = (String) release.get("tag_name"); // e.g. "v2.317.0"
+                if (tag != null && tag.startsWith("v")) return tag.substring(1);
+            }
+        } catch (Exception e) {
+            log.warn("Could not fetch latest runner version, using fallback: {}", e.getMessage());
+        }
+        return "2.317.0";
+    }
+
     @Async
     public CompletableFuture<String> setupRunner(Long userId, Long machineId, String owner, String repo) {
         StringBuilder output = new StringBuilder();
@@ -51,16 +71,20 @@ public class CicdService {
             Map<String, String> tokenData = gitHubService.getRunnerRegistrationToken(userId, owner, repo);
             String token = tokenData.get("token");
             if (token == null || token.isBlank()) {
-                return CompletableFuture.completedFuture("ERROR: Could not obtain runner registration token");
+                return CompletableFuture.completedFuture("ERROR: Could not obtain runner registration token. " +
+                        "Ensure your GitHub token has 'repo' scope and you have admin access to the repository.");
             }
 
             Machine machine = machineService.findByIdAndOwner(machineId, userId);
             String machineName = machine.getName().replaceAll("[^A-Za-z0-9_-]", "-");
+            String version = fetchLatestRunnerVersion();
+            String runnerDir = "/opt/actions-runner/" + owner + "-" + repo;
 
             String command = String.join(" && ",
-                    "mkdir -p /opt/actions-runner/" + owner + "-" + repo,
-                    "cd /opt/actions-runner/" + owner + "-" + repo,
-                    "curl -sL https://github.com/actions/runner/releases/download/v2.322.0/actions-runner-linux-x64-2.322.0.tar.gz | tar xz",
+                    "mkdir -p " + runnerDir,
+                    "cd " + runnerDir,
+                    "curl -fsSL https://github.com/actions/runner/releases/download/v" + version
+                            + "/actions-runner-linux-x64-" + version + ".tar.gz | tar xz",
                     "./config.sh --url https://github.com/" + owner + "/" + repo
                             + " --token " + token
                             + " --unattended"
