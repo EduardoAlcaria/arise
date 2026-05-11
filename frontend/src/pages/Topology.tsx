@@ -122,8 +122,8 @@ export default function Topology() {
     refetchInterval: 30_000,
   })
 
-  const [rfNodes, setRfNodes, onNodesChange] = useNodesState([])
-  const [rfEdges, setRfEdges, onEdgesChange] = useEdgesState([])
+  const [rfNodes, setRfNodes, onNodesChange] = useNodesState<Node>([])
+  const [rfEdges, setRfEdges, onEdgesChange] = useEdgesState<Edge>([])
   const [selectedNode, setSelectedNode] = useState<any>(null)
 
   useEffect(() => {
