@@ -13,6 +13,7 @@ import Cloudflare from './pages/Cloudflare'
 import Settings from './pages/Settings'
 import Topology from './pages/Topology'
 import CiCd from './pages/CiCd'
+import AWS from './pages/AWS'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -41,6 +42,7 @@ export default function App() {
             <Route path="deployments" element={<Deployments />} />
             <Route path="topology" element={<Topology />} />
             <Route path="cicd" element={<CiCd />} />
+            <Route path="aws" element={<AWS />} />
             <Route path="github" element={<GitHub />} />
             <Route path="cloudflare" element={<Cloudflare />} />
             <Route path="settings" element={<Settings />} />
