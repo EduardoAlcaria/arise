@@ -1,6 +1,7 @@
 package com.automationcenter.service;
 
 import com.automationcenter.dto.machine.SshCommandResponse;
+import com.automationcenter.entity.Machine;
 import com.jcraft.jsch.ChannelExec;
 import com.jcraft.jsch.JSch;
 import com.jcraft.jsch.Session;
@@ -15,14 +16,27 @@ public class SshService {
 
     private static final int CONNECT_TIMEOUT_MS = 30_000;
 
-    public SshCommandResponse execute(String host, int port, String username, String privateKey, String command) {
+    /**
+     * Build a configured, ready-to-connect JSch Session for the given machine.
+     * Wires in ProcessProxy when machine.proxyCommand is set.
+     * Caller is responsible for calling session.connect(timeout) and session.disconnect().
+     */
+    public Session openSession(Machine machine) throws Exception {
         JSch jsch = new JSch();
+        jsch.addIdentity("key", machine.getPrivateKey().getBytes(StandardCharsets.UTF_8), null, null);
+        Session session = jsch.getSession(machine.getSshUser(), machine.getHost(), machine.getPort());
+        session.setConfig("StrictHostKeyChecking", "no");
+        if (machine.getProxyCommand() != null && !machine.getProxyCommand().isBlank()) {
+            session.setProxy(new ProcessProxy(machine.getProxyCommand()));
+        }
+        return session;
+    }
+
+    /** Execute a single command on the machine, return stdout/stderr/exitCode. */
+    public SshCommandResponse execute(Machine machine, String command) {
         Session session = null;
         try {
-            jsch.addIdentity("key", privateKey.getBytes(StandardCharsets.UTF_8), null, null);
-
-            session = jsch.getSession(username, host, port);
-            session.setConfig("StrictHostKeyChecking", "no");
+            session = openSession(machine);
             session.connect(CONNECT_TIMEOUT_MS);
 
             ChannelExec channel = (ChannelExec) session.openChannel("exec");
@@ -56,10 +70,10 @@ public class SshService {
         }
     }
 
-    public SshCommandResponse writeFileViaShell(String host, int port, String username, String privateKey,
-                                                 String remotePath, String content) {
+    /** Write a file to the remote machine by base64-encoding content through a shell command. */
+    public SshCommandResponse writeFileViaShell(Machine machine, String remotePath, String content) {
         String b64 = Base64.getEncoder().encodeToString(content.getBytes(StandardCharsets.UTF_8));
         String cmd = "mkdir -p \"$(dirname '" + remotePath + "')\" && echo '" + b64 + "' | base64 -d > '" + remotePath + "'";
-        return execute(host, port, username, privateKey, cmd);
+        return execute(machine, cmd);
     }
 }
