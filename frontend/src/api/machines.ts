@@ -1,5 +1,5 @@
 import client from './client'
-import type { Machine } from '../types'
+import type { Machine, TunnelType } from '../types'
 
 export interface MachineRequest {
   name: string
@@ -7,6 +7,7 @@ export interface MachineRequest {
   port: number
   sshUser: string
   privateKey: string
+  tunnelType?: TunnelType
   proxyCommand?: string
 }
 
