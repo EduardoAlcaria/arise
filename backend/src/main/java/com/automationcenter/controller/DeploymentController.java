@@ -100,6 +100,15 @@ public class DeploymentController {
 
         // Still running — subscribe for live push from the broadcaster
         logBroadcaster.register(id, emitter);
+
+        // Guard against TOCTOU: if deployment finished during replay, close now
+        Deployment fresh = deploymentService.findRawById(id, user.getId());
+        if (fresh.getStatus() == DeploymentStatus.SUCCESS
+                || fresh.getStatus() == DeploymentStatus.FAILED
+                || fresh.getStatus() == DeploymentStatus.ROLLED_BACK) {
+            logBroadcaster.complete(id);
+        }
+
         return emitter;
     }
 }

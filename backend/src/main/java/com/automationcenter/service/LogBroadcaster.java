@@ -31,7 +31,7 @@ public class LogBroadcaster {
         for (SseEmitter emitter : emitters) {
             try {
                 emitter.send(SseEmitter.event().data(message));
-            } catch (IOException e) {
+            } catch (IOException | IllegalStateException e) {
                 log.debug("SSE send failed for deployment {}, removing dead emitter", deploymentId);
                 removeEmitter(deploymentId, emitter);
             }
