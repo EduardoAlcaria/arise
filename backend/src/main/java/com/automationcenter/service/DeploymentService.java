@@ -68,6 +68,14 @@ public class DeploymentService {
             }
         }
 
+        if (request.getType() == DeploymentType.REPOSITORY && request.getConfigFiles() != null && !request.getConfigFiles().isEmpty()) {
+            try {
+                builder.repoConfigs(objectMapper.writeValueAsString(request.getConfigFiles()));
+            } catch (Exception e) {
+                throw new RuntimeException("Failed to serialize repo config files", e);
+            }
+        }
+
         Deployment deployment = deploymentRepository.save(builder.build());
         executeAsync(deployment.getId());
         return toResponse(deployment);
@@ -123,6 +131,36 @@ public class DeploymentService {
                 appendLog(deployment, "Clone failed: " + cloneResult.getStderr(), LogLevel.ERROR);
                 fail(deployment);
                 return;
+            }
+
+            if (deployment.getRepoConfigs() != null) {
+                if (!isWindows) {
+                    try {
+                        List<ConfigFileDto> cfgFiles = objectMapper.readValue(deployment.getRepoConfigs(), new TypeReference<>() {});
+                        for (ConfigFileDto cfg : cfgFiles) {
+                            // path traversal check
+                            String normalised = cfg.getPath().replace("\\", "/");
+                            if (normalised.contains("..")) {
+                                appendLog(deployment, "Skipping unsafe config path: " + cfg.getPath(), LogLevel.WARN);
+                                continue;
+                            }
+                            String filePath = repoDir + "/" + normalised;
+                            appendLog(deployment, "Writing config: " + cfg.getPath(), LogLevel.INFO);
+                            var writeResult = sshService.writeFileViaShell(machine, filePath, cfg.getContent());
+                            if (writeResult.getExitCode() != 0) {
+                                appendLog(deployment, "Failed to write " + cfg.getPath() + ": " + writeResult.getStderr(), LogLevel.ERROR);
+                                fail(deployment);
+                                return;
+                            }
+                        }
+                    } catch (Exception e) {
+                        appendLog(deployment, "Failed to parse config files: " + e.getMessage(), LogLevel.ERROR);
+                        fail(deployment);
+                        return;
+                    }
+                } else {
+                    appendLog(deployment, "Config file injection not supported for Windows targets — skipping", LogLevel.WARN);
+                }
             }
 
             // Detect stack
