@@ -143,7 +143,7 @@ export default function Settings() {
             {saveCfMut.isError && (
               <div className="flex gap-2 items-center rounded-lg px-3 py-2 text-xs text-destructive border border-destructive/20 bg-destructive/5">
                 <AlertTriangle size={12} className="shrink-0" />
-                {(saveCfMut.error as any)?.message ?? 'Failed to save'}
+                {(saveCfMut.error as any)?.response?.data?.message ?? (saveCfMut.error as any)?.message ?? 'Failed to save'}
               </div>
             )}
 
