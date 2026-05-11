@@ -38,3 +38,6 @@ Thumbs.db
 *.log
 postgres_data/
 redis_data/
+
+# Local docs
+docs/upcoming_feautures.md
