@@ -27,11 +27,8 @@ public class InfisicalController {
                 ? request.getBaseUrl()
                 : "https://app.infisical.com";
 
-        // Test connection before saving
-        String token = infisicalService.authenticate(request.getClientId(), request.getClientSecret(), baseUrl);
-        if (token == null) {
-            return ResponseEntity.badRequest().body(Map.of("connected", false, "error", "Authentication failed"));
-        }
+        // authenticate() throws IllegalArgumentException on failure — caught by GlobalExceptionHandler
+        infisicalService.authenticate(request.getClientId(), request.getClientSecret(), baseUrl);
 
         infisicalService.saveCredentials(user.getId(), request.getClientId(), request.getClientSecret(), baseUrl, request.getProjectId());
         return ResponseEntity.ok(Map.of("connected", true, "user", user.getEmail()));

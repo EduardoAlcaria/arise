@@ -257,7 +257,7 @@ export default function Settings() {
             {connectMut.isError && (
               <div className="flex gap-2 items-center rounded-lg px-3 py-2 text-xs text-destructive border border-destructive/20 bg-destructive/5">
                 <AlertTriangle size={12} className="shrink-0" />
-                {(connectMut.error as any)?.message ?? 'Failed to connect'}
+                {(connectMut.error as any)?.response?.data?.message ?? (connectMut.error as any)?.message ?? 'Failed to connect'}
               </div>
             )}
 
