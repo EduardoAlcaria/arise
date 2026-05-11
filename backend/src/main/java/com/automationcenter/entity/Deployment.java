@@ -49,6 +49,11 @@ public class Deployment {
     private String cloudfareTunnelId;
     private String cloudfareTunnelUrl;
 
+    @Column(columnDefinition = "TEXT")
+    private String deployDir;
+
+    private String resolvedCommitSha;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "machine_id")
     private Machine machine;
