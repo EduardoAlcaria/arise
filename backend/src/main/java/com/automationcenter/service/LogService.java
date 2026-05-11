@@ -32,7 +32,4 @@ public class LogService {
         return logEntryRepository.findByDeploymentIdOrderByCreatedAtAsc(deploymentId);
     }
 
-    public List<LogEntry> findByDeploymentIdAfter(Long deploymentId, Long afterId) {
-        return logEntryRepository.findByDeploymentIdAndIdGreaterThanOrderByCreatedAtAsc(deploymentId, afterId);
-    }
 }
