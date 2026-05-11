@@ -10,7 +10,7 @@ import { getMachines } from '../api/machines'
 import {
   GitBranch, Play, RotateCcw, Trash2, ChevronDown, ChevronRight,
   CheckCircle2, XCircle, Clock, Loader2, Circle, Server, Workflow,
-  Zap, RefreshCw, AlertTriangle,
+  Zap, RefreshCw, AlertTriangle, Copy, Check,
 } from 'lucide-react'
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -250,11 +250,14 @@ function SetupRunnerModal({
   const { data: machines } = useQuery({ queryKey: ['machines'], queryFn: getMachines })
   const [machineId, setMachineId] = useState<number | ''>('')
 
+  const [started, setStarted] = useState(false)
+
   const setupMut = useMutation({
     mutationFn: () => setupRunner(owner, repo, machineId as number),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['cicd-runners'] })
-      onClose()
+      setStarted(true)
+      // Poll runners after 30s to check if it appeared
+      setTimeout(() => qc.invalidateQueries({ queryKey: ['cicd-runners'] }), 30_000)
     },
   })
 
@@ -262,42 +265,121 @@ function SetupRunnerModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60">
       <div className="bg-card border border-border rounded-xl p-6 w-full max-w-sm shadow-2xl space-y-4">
         <h2 className="text-sm font-semibold">Set Up Self-Hosted Runner</h2>
-        <p className="text-xs text-muted-foreground">
-          Installs and registers a GitHub Actions runner on the selected machine via SSH.
-        </p>
-        <div>
-          <label className="text-xs text-muted-foreground mb-1 block">Machine</label>
-          <select
-            value={machineId}
-            onChange={e => setMachineId(Number(e.target.value))}
-            className="input w-full"
-          >
-            <option value="">Select machine…</option>
-            {machines?.map(m => (
-              <option key={m.id} value={m.id}>{m.name} ({m.host})</option>
-            ))}
-          </select>
-        </div>
-        {setupMut.error && (
-          <p className="text-xs text-destructive">
-            {(setupMut.error as any)?.response?.data?.message ?? 'Setup failed'}
-          </p>
-        )}
-        {setupMut.isSuccess && (
-          <p className="text-xs text-green-400">Runner setup started — check machine logs.</p>
+        {!started ? (
+          <>
+            <p className="text-xs text-muted-foreground">
+              Detects OS/arch, downloads the correct GitHub Actions runner binary via SSH, and registers it with GitHub.
+              Requires the machine's SSH user to have <code>sudo</code> access (Linux) or standard access (macOS).
+            </p>
+            <div>
+              <label className="text-xs text-muted-foreground mb-1 block">Machine</label>
+              <select
+                value={machineId}
+                onChange={e => setMachineId(Number(e.target.value))}
+                className="input w-full"
+              >
+                <option value="">Select machine…</option>
+                {machines?.map(m => (
+                  <option key={m.id} value={m.id}>{m.name} ({m.host})</option>
+                ))}
+              </select>
+            </div>
+            {setupMut.error && (
+              <p className="text-xs text-destructive">
+                {(setupMut.error as any)?.response?.data?.message ?? 'Setup failed'}
+              </p>
+            )}
+          </>
+        ) : (
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 text-green-400 text-sm">
+              <Loader2 size={14} className="animate-spin" />
+              Runner setup running on machine…
+            </div>
+            <p className="text-xs text-muted-foreground">
+              This takes ~1–2 minutes. The runner will appear in the Runners tab once registered.
+              You can close this dialog — setup continues in the background.
+            </p>
+          </div>
         )}
         <div className="flex gap-2 justify-end">
-          <button className="btn-ghost text-sm" onClick={onClose}>Cancel</button>
-          <button
-            className="btn-primary text-sm flex items-center gap-1.5"
-            onClick={() => setupMut.mutate()}
-            disabled={setupMut.isPending || !machineId}
-          >
-            {setupMut.isPending && <Loader2 size={12} className="animate-spin" />}
-            <Server size={12} /> Set Up
-          </button>
+          <button className="btn-ghost text-sm" onClick={onClose}>{started ? 'Close' : 'Cancel'}</button>
+          {!started && (
+            <button
+              className="btn-primary text-sm flex items-center gap-1.5"
+              onClick={() => setupMut.mutate()}
+              disabled={setupMut.isPending || !machineId}
+            >
+              {setupMut.isPending && <Loader2 size={12} className="animate-spin" />}
+              <Server size={12} /> Set Up
+            </button>
+          )}
         </div>
       </div>
+    </div>
+  )
+}
+
+// ── Workflow template ─────────────────────────────────────────────────────────
+
+function WorkflowTemplate({ owner, repo }: { owner: string; repo: string }) {
+  const [copied, setCopied] = useState(false)
+  const template = `name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: self-hosted
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run tests
+        run: |
+          echo "Add your build/test steps here"
+
+      - name: Deploy
+        run: |
+          echo "Add your deploy steps here"
+`
+
+  const copy = () => {
+    navigator.clipboard.writeText(template)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-col items-center gap-2 py-8 text-muted-foreground">
+        <Zap size={28} className="opacity-20" />
+        <p className="text-sm opacity-70">No workflow files found in <code className="text-xs bg-muted px-1 rounded">.github/workflows/</code></p>
+        <p className="text-xs opacity-50">Add a workflow file to your repo to get started.</p>
+      </div>
+      <div className="border border-border rounded-lg overflow-hidden">
+        <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-muted/30">
+          <span className="text-xs font-medium text-muted-foreground font-mono">.github/workflows/ci.yml</span>
+          <button
+            onClick={copy}
+            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+          >
+            {copied ? <Check size={12} className="text-green-400" /> : <Copy size={12} />}
+            {copied ? 'Copied!' : 'Copy'}
+          </button>
+        </div>
+        <pre className="p-4 text-xs font-mono text-foreground leading-relaxed overflow-x-auto bg-muted/10 whitespace-pre">
+          {template}
+        </pre>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Commit this file to <code className="bg-muted px-1 rounded">{owner}/{repo}</code> and set up a self-hosted runner in the Runners tab.
+      </p>
     </div>
   )
 }
@@ -493,10 +575,7 @@ export default function CiCd() {
                 </div>
               )}
               {!workflowsLoading && (!workflows || workflows.length === 0) && (
-                <div className="flex flex-col items-center justify-center py-16 gap-2 text-muted-foreground">
-                  <Zap size={28} className="opacity-20" />
-                  <p className="text-sm opacity-50">No workflow files found in .github/workflows/</p>
-                </div>
+                <WorkflowTemplate owner={owner} repo={repo} />
               )}
               {workflows?.map(w => (
                 <div key={w} className="flex items-center gap-3 px-4 py-3 border border-border rounded-lg">

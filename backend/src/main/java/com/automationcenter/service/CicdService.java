@@ -11,6 +11,7 @@ import org.kohsuke.github.GitHubBuilder;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -78,21 +79,44 @@ public class CicdService {
             Machine machine = machineService.findByIdAndOwner(machineId, userId);
             String machineName = machine.getName().replaceAll("[^A-Za-z0-9_-]", "-");
             String version = fetchLatestRunnerVersion();
-            String runnerDir = "/opt/actions-runner/" + owner + "-" + repo;
+
+            // Detect OS and architecture
+            var osResult = sshService.execute(machine, "uname -s");
+            var archResult = sshService.execute(machine, "uname -m");
+            String os = osResult.getStdout().trim().toLowerCase();
+            String arch = archResult.getStdout().trim().toLowerCase();
+
+            String platform;
+            String archLabel;
+            if (os.contains("darwin")) {
+                platform = arch.contains("arm") || arch.contains("aarch64") ? "osx-arm64" : "osx-x64";
+                archLabel = arch.contains("arm") || arch.contains("aarch64") ? "ARM64" : "X64";
+            } else {
+                platform = arch.contains("arm") || arch.contains("aarch64") ? "linux-arm64" : "linux-x64";
+                archLabel = arch.contains("arm") || arch.contains("aarch64") ? "ARM64" : "X64";
+            }
+            String osLabel = os.contains("darwin") ? "macOS" : "Linux";
+            String runnerDir = (os.contains("darwin") ? "/Users/" + machine.getSshUser() : "/opt")
+                    + "/actions-runner/" + owner + "-" + repo;
+
+            String tarFile = "actions-runner-" + platform + "-" + version + ".tar.gz";
+            String downloadUrl = "https://github.com/actions/runner/releases/download/v" + version + "/" + tarFile;
+
+            String svcInstall = os.contains("darwin") ? "./svc.sh install" : "sudo ./svc.sh install";
+            String svcStart   = os.contains("darwin") ? "./svc.sh start"   : "sudo ./svc.sh start";
 
             String command = String.join(" && ",
                     "mkdir -p " + runnerDir,
                     "cd " + runnerDir,
-                    "curl -fsSL https://github.com/actions/runner/releases/download/v" + version
-                            + "/actions-runner-linux-x64-" + version + ".tar.gz | tar xz",
+                    "curl -fsSL " + downloadUrl + " | tar xz",
                     "./config.sh --url https://github.com/" + owner + "/" + repo
                             + " --token " + token
                             + " --unattended"
                             + " --name " + machineName
-                            + " --labels self-hosted,Linux,X64," + machineName
+                            + " --labels self-hosted," + osLabel + "," + archLabel + "," + machineName
                             + " --replace",
-                    "sudo ./svc.sh install",
-                    "sudo ./svc.sh start"
+                    svcInstall,
+                    svcStart
             );
 
             var result = sshService.execute(machine, command);
@@ -110,28 +134,39 @@ public class CicdService {
 
     public void rerunWorkflow(Long userId, String owner, String repo, Long runId) {
         User user = getUser(userId);
-        webClientBuilder.build()
-                .post()
-                .uri("https://api.github.com/repos/{owner}/{repo}/actions/runs/{runId}/rerun", owner, repo, runId)
-                .header("Authorization", "token " + user.getGithubToken())
-                .header("Accept", "application/vnd.github+json")
-                .retrieve()
-                .bodyToMono(Map.class)
-                .block();
+        try {
+            webClientBuilder.build()
+                    .post()
+                    .uri("https://api.github.com/repos/{owner}/{repo}/actions/runs/{runId}/rerun", owner, repo, runId)
+                    .header("Authorization", "token " + user.getGithubToken())
+                    .header("Accept", "application/vnd.github+json")
+                    .retrieve()
+                    .bodyToMono(Void.class)
+                    .block();
+        } catch (WebClientResponseException e) {
+            throw new IllegalArgumentException("GitHub API error " + e.getStatusCode().value() + ": " + e.getResponseBodyAsString());
+        }
     }
 
     public void triggerWorkflow(Long userId, String owner, String repo, String workflowId, String ref) {
         User user = getUser(userId);
-        webClientBuilder.build()
-                .post()
-                .uri("https://api.github.com/repos/{owner}/{repo}/actions/workflows/{workflowId}/dispatches",
-                        owner, repo, workflowId)
-                .header("Authorization", "token " + user.getGithubToken())
-                .header("Accept", "application/vnd.github+json")
-                .bodyValue(Map.of("ref", ref))
-                .retrieve()
-                .bodyToMono(Map.class)
-                .block();
+        try {
+            webClientBuilder.build()
+                    .post()
+                    .uri("https://api.github.com/repos/{owner}/{repo}/actions/workflows/{workflowId}/dispatches",
+                            owner, repo, workflowId)
+                    .header("Authorization", "token " + user.getGithubToken())
+                    .header("Accept", "application/vnd.github+json")
+                    .bodyValue(Map.of("ref", ref))
+                    .retrieve()
+                    .bodyToMono(Void.class)
+                    .block();
+        } catch (WebClientResponseException e) {
+            String msg = e.getStatusCode().value() == 422
+                    ? "Workflow '" + workflowId + "' does not have 'on: workflow_dispatch' trigger. Add it to enable manual runs."
+                    : "GitHub API error " + e.getStatusCode().value() + ": " + e.getResponseBodyAsString();
+            throw new IllegalArgumentException(msg);
+        }
     }
 
     public List<Map<String, Object>> getWorkflowJobs(Long userId, String owner, String repo, Long runId) {
