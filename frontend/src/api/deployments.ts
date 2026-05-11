@@ -36,3 +36,6 @@ export const redeployDeployment = (id: number) =>
 export const getDeploymentLogs = (id: number) => client.get<LogEntry[]>(`/deployments/${id}/logs`).then((r) => r.data)
 export const addDeploymentTunnel = (id: number, tunnelName: string, tunnelHostname: string, tunnelAppPort: number) =>
   client.post<Deployment>(`/deployments/${id}/tunnel`, { tunnelName, tunnelHostname, tunnelAppPort }).then((r) => r.data)
+export const deleteDeployment = (id: number) => client.delete(`/deployments/${id}`)
+export const removeDeploymentTunnel = (id: number) =>
+  client.delete<Deployment>(`/deployments/${id}/tunnel`).then((r) => r.data)

@@ -348,6 +348,52 @@ public class DeploymentService {
         return toResponse(findByIdAndOwner(id, ownerId));
     }
 
+    @org.springframework.transaction.annotation.Transactional
+    public void delete(Long id, Long ownerId) {
+        Deployment deployment = findByIdAndOwner(id, ownerId);
+
+        // Stop running containers
+        if (deployment.getDeployDir() != null && !deployment.getDeployDir().isBlank() && deployment.getMachine() != null) {
+            try {
+                sshService.execute(deployment.getMachine(),
+                        "cd " + deployment.getDeployDir() + " && docker compose down 2>/dev/null; true");
+            } catch (Exception e) {
+                log.warn("Could not stop containers for deployment {}: {}", id, e.getMessage());
+            }
+        }
+
+        // Delete Cloudflare tunnel
+        if (deployment.getCloudfareTunnelId() != null && !deployment.getCloudfareTunnelId().isBlank()) {
+            try {
+                cloudflareService.deleteTunnel(ownerId, deployment.getCloudfareTunnelId());
+            } catch (Exception e) {
+                log.warn("Could not delete Cloudflare tunnel for deployment {}: {}", id, e.getMessage());
+            }
+        }
+
+        logService.deleteByDeploymentId(id);
+        deploymentRepository.delete(deployment);
+    }
+
+    public DeploymentResponse removeTunnel(Long id, Long ownerId) {
+        Deployment deployment = findByIdAndOwner(id, ownerId);
+        if (deployment.getCloudfareTunnelId() == null || deployment.getCloudfareTunnelId().isBlank()) {
+            throw new IllegalArgumentException("This deployment has no Cloudflare tunnel");
+        }
+        // Best-effort delete from Cloudflare (cloudflared container on machine still runs until next restart)
+        try {
+            cloudflareService.deleteTunnel(ownerId, deployment.getCloudfareTunnelId());
+        } catch (Exception e) {
+            log.warn("Could not delete tunnel {} from Cloudflare: {}", deployment.getCloudfareTunnelId(), e.getMessage());
+        }
+        deployment.setCloudfareTunnelId(null);
+        deployment.setCloudfareTunnelUrl(null);
+        deployment.setTunnelName(null);
+        deployment.setTunnelHostname(null);
+        deployment.setTunnelAppPort(null);
+        return toResponse(deploymentRepository.save(deployment));
+    }
+
     public DeploymentResponse rollback(Long id, Long ownerId) {
         Deployment deployment = findByIdAndOwner(id, ownerId);
         DeploymentStatus currentStatus = deployment.getStatus();

@@ -7,6 +7,7 @@ import com.automationcenter.entity.User;
 import com.automationcenter.exception.ResourceNotFoundException;
 import com.automationcenter.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
@@ -16,6 +17,7 @@ import java.util.Map;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class CloudflareService {
 
     private final UserRepository userRepository;
@@ -180,6 +182,20 @@ public class CloudflareService {
                 .retrieve()
                 .bodyToMono(Map.class)
                 .block();
+    }
+
+    public void deleteTunnel(Long userId, String tunnelId) {
+        User user = getUser(userId);
+        try {
+            buildClient(user.getCloudflareToken())
+                    .delete()
+                    .uri("/accounts/{accountId}/cfd_tunnel/{tunnelId}", user.getCloudflareAccountId(), tunnelId)
+                    .retrieve()
+                    .bodyToMono(Map.class)
+                    .block();
+        } catch (Exception e) {
+            log.warn("Failed to delete Cloudflare tunnel {}: {}", tunnelId, e.getMessage());
+        }
     }
 
     private WebClient buildClient(String token) {

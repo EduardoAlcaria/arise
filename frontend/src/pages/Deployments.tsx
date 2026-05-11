@@ -1,10 +1,10 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { getDeployments, createDeployment, rollbackDeployment, redeployDeployment, getDeploymentLogs, addDeploymentTunnel } from '../api/deployments'
+import { getDeployments, createDeployment, rollbackDeployment, redeployDeployment, getDeploymentLogs, addDeploymentTunnel, deleteDeployment, removeDeploymentTunnel } from '../api/deployments'
 import type { Deployment } from '../types'
 import { getMachines } from '../api/machines'
 import { getGitHubUser, type GHUser } from '../api/github'
-import { Plus, RotateCcw, RefreshCw, FileText, X, Search, Rocket, ChevronDown, ChevronRight, Radio, Cloud, ExternalLink, AlertTriangle, Loader2 } from 'lucide-react'
+import { Plus, RotateCcw, RefreshCw, FileText, X, Search, Rocket, ChevronDown, ChevronRight, Radio, Cloud, ExternalLink, AlertTriangle, Loader2, Trash2, CloudOff } from 'lucide-react'
 import { StackIcon, StatusDot } from '../components/icons'
 import DeployRepoWizard, { type DeployItem, type AppDeployPayload } from '../components/DeployRepoWizard'
 import DeploymentWatcher from '../components/DeploymentWatcher'
@@ -93,6 +93,10 @@ export default function Deployments() {
   const [watching, setWatching] = useState<{ id: number; name: string } | null>(null)
   const [expandedKey, setExpandedKey] = useState<string | null>(null)
 
+  // Confirm delete modal
+  type ConfirmAction = { id: number; label: string; type: 'deployment' | 'tunnel' }
+  const [confirm, setConfirm] = useState<ConfirmAction | null>(null)
+
   // Tunnel modal state
   const [tunnelModal, setTunnelModal] = useState<TunnelModalState | null>(null)
   const [tunnelName, setTunnelName] = useState('')
@@ -121,6 +125,22 @@ export default function Deployments() {
     onSuccess: (dep) => {
       qc.invalidateQueries({ queryKey: ['deployments-all'] })
       setWatching({ id: dep.id, name: dep.name })
+    },
+  })
+
+  const deleteMut = useMutation({
+    mutationFn: (id: number) => deleteDeployment(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['deployments-all'] })
+      setConfirm(null)
+    },
+  })
+
+  const removeTunnelMut = useMutation({
+    mutationFn: (id: number) => removeDeploymentTunnel(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['deployments-all'] })
+      setConfirm(null)
     },
   })
 
@@ -330,15 +350,24 @@ export default function Deployments() {
                               </span>
                             )}
                             {run.cloudfareTunnelUrl && (
-                              <a
-                                href={run.cloudfareTunnelUrl}
-                                target="_blank"
-                                rel="noreferrer"
-                                onClick={e => e.stopPropagation()}
-                                className="flex items-center gap-1 text-[11px] text-primary hover:underline shrink-0"
-                              >
-                                <Cloud size={10} />{run.tunnelHostname ?? run.cloudfareTunnelUrl}
-                              </a>
+                              <div className="flex items-center gap-1 shrink-0">
+                                <a
+                                  href={run.cloudfareTunnelUrl}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  onClick={e => e.stopPropagation()}
+                                  className="flex items-center gap-1 text-[11px] text-primary hover:underline"
+                                >
+                                  <Cloud size={10} />{run.tunnelHostname ?? run.cloudfareTunnelUrl}
+                                </a>
+                                <button
+                                  onClick={e => { e.stopPropagation(); setConfirm({ id: run.id, label: run.tunnelHostname ?? 'tunnel', type: 'tunnel' }) }}
+                                  title="Remove tunnel"
+                                  className="p-0.5 rounded hover:bg-muted text-muted-foreground hover:text-destructive transition-colors"
+                                >
+                                  <CloudOff size={11} />
+                                </button>
+                              </div>
                             )}
                           </div>
                           <div className="text-right shrink-0 hidden sm:block">
@@ -393,6 +422,13 @@ export default function Deployments() {
                                 <RotateCcw size={13} />
                               </button>
                             )}
+                            <button
+                              onClick={() => setConfirm({ id: run.id, label: run.name, type: 'deployment' })}
+                              title="Delete deployment"
+                              className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-destructive transition-colors"
+                            >
+                              <Trash2 size={13} />
+                            </button>
                           </div>
                         </div>
                       ))}
@@ -505,6 +541,53 @@ export default function Deployments() {
                   }
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {confirm && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+          <div className="bg-card border border-border rounded-2xl p-6 w-full max-w-sm shadow-2xl animate-fade-up">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-9 h-9 rounded-lg bg-destructive/10 flex items-center justify-center shrink-0">
+                <Trash2 size={16} className="text-destructive" />
+              </div>
+              <div>
+                <p className="font-semibold text-foreground text-sm">
+                  {confirm.type === 'deployment' ? 'Delete deployment?' : 'Remove tunnel?'}
+                </p>
+                <p className="text-[11px] text-muted-foreground mt-0.5 font-mono truncate max-w-[220px]">{confirm.label}</p>
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground mb-5">
+              {confirm.type === 'deployment'
+                ? 'This will stop running containers, delete the Cloudflare tunnel if any, and remove all logs. This cannot be undone.'
+                : 'This will delete the Cloudflare tunnel and DNS record. The running cloudflared container on the machine will not be stopped automatically.'}
+            </p>
+            {(deleteMut.isError || removeTunnelMut.isError) && (
+              <div className="flex gap-2 items-center rounded-lg px-3 py-2 text-xs text-destructive border border-destructive/20 bg-destructive/5 mb-3">
+                <AlertTriangle size={12} className="shrink-0" />
+                {((deleteMut.error ?? removeTunnelMut.error) as any)?.response?.data?.message ?? 'Operation failed'}
+              </div>
+            )}
+            <div className="flex gap-2">
+              <button
+                onClick={() => { setConfirm(null); deleteMut.reset(); removeTunnelMut.reset() }}
+                className="flex-1 py-2 border border-border text-foreground text-sm rounded-lg hover:bg-muted transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => confirm.type === 'deployment' ? deleteMut.mutate(confirm.id) : removeTunnelMut.mutate(confirm.id)}
+                disabled={deleteMut.isPending || removeTunnelMut.isPending}
+                className="flex-1 flex items-center justify-center gap-2 py-2 bg-destructive text-destructive-foreground text-sm font-semibold rounded-lg hover:opacity-90 disabled:opacity-50 transition-all"
+              >
+                {(deleteMut.isPending || removeTunnelMut.isPending)
+                  ? <><Loader2 size={13} className="animate-spin" />Deleting…</>
+                  : <><Trash2 size={13} />{confirm.type === 'deployment' ? 'Delete' : 'Remove tunnel'}</>
+                }
+              </button>
             </div>
           </div>
         </div>

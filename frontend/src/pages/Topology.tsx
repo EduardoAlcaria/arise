@@ -65,7 +65,7 @@ function TopologyNodeCard({ data, selected }: { data: any; selected?: boolean })
         style={{ background: color, border: 'none', width: 8, height: 8 }}
       />
       <div style={{
-        background: '#1e293b',
+        background: '#27272a',
         border: `1.5px solid ${selected ? color : color + '40'}`,
         borderRadius: 10,
         padding: '10px 14px',
@@ -113,7 +113,7 @@ function SidePanel({ node, onClose }: { node: any; onClose: () => void }) {
   return (
     <div style={{
       position: 'absolute', top: 16, right: 16, width: 280, zIndex: 10,
-      background: '#1e293b', border: '1px solid #334155',
+      background: '#27272a', border: '1px solid #334155',
       borderRadius: 12, padding: 16, boxShadow: '0 4px 24px rgba(0,0,0,0.5)',
     }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
@@ -275,8 +275,20 @@ export default function Topology() {
   )
 
   return (
-    <div style={{ width: '100%', height: '100%', position: 'relative', background: '#0f172a' }}>
+    <div style={{ width: '100%', height: '100%', position: 'relative', background: '#18181b' }}>
+      <style>{`
+        .arise-topology .react-flow__controls-button {
+          background: #000;
+          border-color: #333;
+          fill: #fff;
+        }
+        .arise-topology .react-flow__controls-button:hover {
+          background: #111;
+        }
+        .arise-topology .react-flow__minimap { border-radius: 8px; overflow: hidden; }
+      `}</style>
       <ReactFlow
+        className="arise-topology"
         nodes={rfNodes}
         edges={rfEdges}
         onNodesChange={onNodesChange}
@@ -293,7 +305,7 @@ export default function Topology() {
           variant={BackgroundVariant.Dots}
           gap={24}
           size={1.5}
-          color="#1e3a5f"
+          color="#3f3f46"
         />
         <Controls style={{ background: '#1e293b', border: '1px solid #334155' }} />
         <MiniMap
@@ -306,7 +318,7 @@ export default function Topology() {
         <Panel position="top-left">
           <div style={{
             display: 'flex', flexDirection: 'column', gap: 8,
-            background: '#1e293b', border: '1px solid #334155',
+            background: '#27272a', border: '1px solid #334155',
             borderRadius: 10, padding: '10px 12px', minWidth: 230,
             boxShadow: '0 2px 16px rgba(0,0,0,0.5)',
           }}>
@@ -320,7 +332,7 @@ export default function Topology() {
                 placeholder="Search nodes…"
                 style={{
                   width: '100%', padding: '5px 28px 5px 26px',
-                  background: '#0f172a', border: '1px solid #334155',
+                  background: '#18181b', border: '1px solid #3f3f46',
                   borderRadius: 6, fontSize: 12, color: '#f1f5f9', outline: 'none',
                 }}
               />
