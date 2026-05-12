@@ -250,10 +250,10 @@ public class AwsService {
                         item.put("hasFault", t.hasFault());
                         item.put("hasError", t.hasError());
                         item.put("hasThrottle", t.hasThrottle());
-                        if (t.http() != null && t.http().request() != null) {
-                            item.put("url", t.http().request().url());
-                            item.put("method", t.http().request().method());
-                            item.put("clientIp", t.http().request().clientIp());
+                        if (t.http() != null) {
+                            item.put("url", t.http().httpURL());
+                            item.put("method", t.http().httpMethod());
+                            item.put("clientIp", t.http().clientIp());
                         }
                         item.put("serviceCount", t.serviceIds() != null ? t.serviceIds().size() : 0);
                         return item;
