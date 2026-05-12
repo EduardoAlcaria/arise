@@ -24,6 +24,12 @@ import software.amazon.awssdk.services.ecs.model.ListServicesRequest;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.sts.StsClient;
 import software.amazon.awssdk.services.sts.model.GetCallerIdentityResponse;
+import software.amazon.awssdk.services.xray.XRayClient;
+import software.amazon.awssdk.services.xray.model.BatchGetTracesRequest;
+import software.amazon.awssdk.services.xray.model.GetTraceSummariesRequest;
+import software.amazon.awssdk.services.xray.model.Trace;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -219,6 +225,70 @@ public class AwsService {
                     .toList();
         } catch (Exception e) {
             throw new IllegalArgumentException("Failed to list ECS services: " + e.getMessage());
+        }
+    }
+
+    // ── X-Ray Traces ──────────────────────────────────────────────────────────
+
+    public List<Map<String, Object>> listTraces(Long userId, Long accountId, String region, int minutes) {
+        AwsAccount account = getAccount(accountId, userId);
+        String effectiveRegion = region != null ? region : account.getDefaultRegion();
+        try (XRayClient xray = XRayClient.builder()
+                .credentialsProvider(credentialsFor(account))
+                .region(Region.of(effectiveRegion))
+                .build()) {
+            Instant end = Instant.now();
+            Instant start = end.minus(minutes, ChronoUnit.MINUTES);
+            return xray.getTraceSummariesPaginator(GetTraceSummariesRequest.builder()
+                            .startTime(start).endTime(end).build())
+                    .traceSummaries().stream()
+                    .map(t -> {
+                        Map<String, Object> item = new LinkedHashMap<>();
+                        item.put("id", t.id());
+                        item.put("duration", t.duration());
+                        item.put("responseTime", t.responseTime());
+                        item.put("hasFault", t.hasFault());
+                        item.put("hasError", t.hasError());
+                        item.put("hasThrottle", t.hasThrottle());
+                        if (t.http() != null && t.http().request() != null) {
+                            item.put("url", t.http().request().url());
+                            item.put("method", t.http().request().method());
+                            item.put("clientIp", t.http().request().clientIp());
+                        }
+                        item.put("serviceCount", t.serviceIds() != null ? t.serviceIds().size() : 0);
+                        return item;
+                    })
+                    .toList();
+        } catch (Exception e) {
+            throw new IllegalArgumentException("Failed to list X-Ray traces: " + e.getMessage());
+        }
+    }
+
+    public Map<String, Object> getTrace(Long userId, Long accountId, String traceId, String region) {
+        AwsAccount account = getAccount(accountId, userId);
+        String effectiveRegion = region != null ? region : account.getDefaultRegion();
+        try (XRayClient xray = XRayClient.builder()
+                .credentialsProvider(credentialsFor(account))
+                .region(Region.of(effectiveRegion))
+                .build()) {
+            List<Trace> traces = xray.batchGetTraces(
+                    BatchGetTracesRequest.builder().traceIds(traceId).build()
+            ).traces();
+            if (traces.isEmpty()) throw new ResourceNotFoundException("Trace not found: " + traceId);
+
+            Trace trace = traces.get(0);
+            List<Map<String, Object>> segments = trace.segments().stream().map(seg -> {
+                Map<String, Object> s = new LinkedHashMap<>();
+                s.put("id", seg.id());
+                s.put("document", seg.document());
+                return s;
+            }).toList();
+
+            return Map.of("id", trace.id(), "duration", trace.duration(), "segments", segments);
+        } catch (ResourceNotFoundException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IllegalArgumentException("Failed to fetch trace: " + e.getMessage());
         }
     }
 
