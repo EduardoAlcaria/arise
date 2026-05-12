@@ -28,6 +28,8 @@ import software.amazon.awssdk.services.xray.XRayClient;
 import software.amazon.awssdk.services.xray.model.BatchGetTracesRequest;
 import software.amazon.awssdk.services.xray.model.GetTraceSummariesRequest;
 import software.amazon.awssdk.services.xray.model.Trace;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 
@@ -117,6 +119,39 @@ public class AwsService {
     public void deleteAccount(Long userId, Long accountId) {
         AwsAccount account = getAccount(accountId, userId);
         accountRepository.delete(account);
+    }
+
+    public Map<String, String> ssoLogin(Long userId, Long accountId) {
+        AwsAccount account = getAccount(accountId, userId);
+        try {
+            ProcessBuilder pb = new ProcessBuilder(
+                    "aws", "sso", "login", "--profile", account.getProfileName(), "--no-browser");
+            pb.redirectErrorStream(true);
+            Process process = pb.start();
+
+            String url = null;
+            String code = null;
+            BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
+            String line;
+            while ((line = reader.readLine()) != null) {
+                line = line.trim();
+                if (line.startsWith("https://")) url = line;
+                if (line.matches("[A-Z0-9]{4}-[A-Z0-9]{4}")) code = line;
+                if (url != null && code != null) break;
+            }
+            // Leave the process running — it polls for browser approval and writes token when done
+
+            if (url == null || code == null) {
+                process.destroyForcibly();
+                throw new IllegalArgumentException(
+                        "Could not extract SSO login URL from aws CLI output. Is the profile '" + account.getProfileName() + "' configured?");
+            }
+            return Map.of("url", url, "code", code, "profile", account.getProfileName());
+        } catch (IllegalArgumentException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IllegalArgumentException("Failed to start SSO login: " + e.getMessage());
+        }
     }
 
     // ── EC2 ───────────────────────────────────────────────────────────────────

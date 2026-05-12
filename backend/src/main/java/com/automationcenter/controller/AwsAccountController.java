@@ -31,6 +31,13 @@ public class AwsAccountController {
         return ResponseEntity.ok(awsService.listAccounts(user.getId()));
     }
 
+    @PostMapping("/{id}/sso-login")
+    public ResponseEntity<java.util.Map<String, String>> ssoLogin(
+            @PathVariable Long id,
+            @AuthenticationPrincipal User user) {
+        return ResponseEntity.ok(awsService.ssoLogin(user.getId(), id));
+    }
+
     @PutMapping("/{id}")
     public ResponseEntity<AwsAccountResponse> update(
             @PathVariable Long id,

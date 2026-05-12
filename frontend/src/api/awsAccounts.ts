@@ -27,5 +27,8 @@ export const createAwsAccount = (req: AwsAccountRequest) =>
 export const updateAwsAccount = (id: number, req: AwsAccountRequest) =>
   client.put<AwsAccountResponse>(`/aws/accounts/${id}`, req).then(r => r.data)
 
+export const ssoLogin = (id: number) =>
+  client.post<{ url: string; code: string; profile: string }>(`/aws/accounts/${id}/sso-login`).then(r => r.data)
+
 export const deleteAwsAccount = (id: number) =>
   client.delete(`/aws/accounts/${id}`)
