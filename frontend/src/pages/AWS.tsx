@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import type { Ec2Instance, EcsCluster } from '../api/aws'
+import type { EcsCluster } from '../api/aws'
 import {
   listEc2Instances, listS3Buckets, listEcsClusters, listEcsServices,
   startInstance, stopInstance, terminateInstance,
