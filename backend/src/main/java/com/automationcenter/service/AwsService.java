@@ -35,7 +35,6 @@ public class AwsService {
 
     private final UserRepository userRepository;
 
-    // ── Credentials ───────────────────────────────────────────────────────────
 
     public Map<String, String> saveCredentials(Long userId, String accessKeyId, String secretAccessKey, String region) {
         StaticCredentialsProvider creds = StaticCredentialsProvider.create(
@@ -87,7 +86,6 @@ public class AwsService {
         return result;
     }
 
-    // ── EC2 ───────────────────────────────────────────────────────────────────
 
     public List<Map<String, Object>> listEc2Instances(Long userId, String region) {
         User user = getConfiguredUser(userId);
@@ -103,7 +101,7 @@ public class AwsService {
                         item.put("publicIp", i.publicIpAddress());
                         item.put("privateIp", i.privateIpAddress());
                         item.put("launchTime", i.launchTime() != null ? i.launchTime().toString() : null);
-                        item.put("platform", i.platformDetailsAsString());
+                        item.put("platform", i.platformDetails().toString());
                         String name = i.tags().stream()
                                 .filter(t -> "Name".equals(t.key()))
                                 .map(Tag::value)
@@ -148,7 +146,6 @@ public class AwsService {
         }
     }
 
-    // ── S3 ────────────────────────────────────────────────────────────────────
 
     public List<Map<String, Object>> listS3Buckets(Long userId) {
         User user = getConfiguredUser(userId);
@@ -169,7 +166,6 @@ public class AwsService {
         }
     }
 
-    // ── ECS ───────────────────────────────────────────────────────────────────
 
     public List<Map<String, Object>> listEcsClusters(Long userId, String region) {
         User user = getConfiguredUser(userId);
@@ -219,7 +215,6 @@ public class AwsService {
         }
     }
 
-    // ── Helpers ───────────────────────────────────────────────────────────────
 
     private StaticCredentialsProvider credentialsFor(User user) {
         return StaticCredentialsProvider.create(
