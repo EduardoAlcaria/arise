@@ -164,7 +164,7 @@
         </dependency>
         <dependency>
             <groupId>software.amazon.awssdk</groupId>
-            <artifactId>cloudwatch-logs</artifactId>
+            <artifactId>cloudwatchlogs</artifactId>
         </dependency>
         <dependency>
             <groupId>software.amazon.awssdk</groupId>
