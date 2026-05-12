@@ -9,7 +9,7 @@ import { listAwsAccounts, createAwsAccount, updateAwsAccount, deleteAwsAccount, 
 import type { AwsAccountResponse } from '../api/awsAccounts'
 import {
   Server, HardDrive, Box, Play, Square, Trash2, ChevronDown, ChevronRight,
-  AlertTriangle, Loader2, RefreshCw, Plus, X, CheckCircle, XCircle, Network,
+  AlertTriangle, Loader2, RefreshCw, Plus, X, CheckCircle, Network,
   Activity, Key, Pencil, LogIn, ExternalLink, Copy,
 } from 'lucide-react'
 
