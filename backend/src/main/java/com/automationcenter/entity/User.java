@@ -54,15 +54,6 @@ public class User implements UserDetails {
     @Column
     private String infisicalProjectId;
 
-    @Column
-    private String awsAccessKeyId;
-
-    @Column(columnDefinition = "TEXT")
-    private String awsSecretAccessKey;
-
-    @Column(length = 50)
-    private String awsDefaultRegion;
-
     @CreationTimestamp
     private LocalDateTime createdAt;
 
