@@ -1,5 +1,7 @@
 package com.automationcenter.service;
 
+import com.automationcenter.config.DataSeeder;
+import com.automationcenter.config.MockAwsData;
 import com.automationcenter.entity.AwsAccount;
 import com.automationcenter.exception.ResourceNotFoundException;
 import com.automationcenter.repository.AwsAccountRepository;
@@ -31,6 +33,9 @@ public class AwsTopologyService {
         AwsAccount account = accountRepository.findByIdAndOwnerId(accountId, userId)
                 .orElseThrow(() -> new ResourceNotFoundException("AWS account not found"));
         String effectiveRegion = region != null ? region : account.getDefaultRegion();
+
+        if (DataSeeder.DEMO_PROFILE.equals(account.getProfileName()))
+            return MockAwsData.topology(effectiveRegion);
 
         List<Map<String, Object>> nodes = new ArrayList<>();
         List<Map<String, Object>> edges = new ArrayList<>();
