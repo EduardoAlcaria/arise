@@ -82,21 +82,34 @@ public class CloudflareService {
                 "name", request.getName(),
                 "tunnel_secret", request.getTunnelSecret()
         );
-        Map<String, Object> response = buildClient(user.getCloudflareToken())
-                .post()
-                .uri("/accounts/{accountId}/cfd_tunnel", user.getCloudflareAccountId())
-                .bodyValue(body)
-                .retrieve()
-                .bodyToMono(Map.class)
-                .block();
+        try {
+            Map<String, Object> response = buildClient(user.getCloudflareToken())
+                    .post()
+                    .uri("/accounts/{accountId}/cfd_tunnel", user.getCloudflareAccountId())
+                    .bodyValue(body)
+                    .retrieve()
+                    .bodyToMono(Map.class)
+                    .block();
 
-        Map<String, Object> result = (Map<String, Object>) response.get("result");
-        return new CloudflareTunnelResponse(
-                (String) result.get("id"),
-                (String) result.get("name"),
-                (String) result.get("status"),
-                user.getCloudflareAccountId()
-        );
+            Map<String, Object> result = (Map<String, Object>) response.get("result");
+            return new CloudflareTunnelResponse(
+                    (String) result.get("id"),
+                    (String) result.get("name"),
+                    (String) result.get("status"),
+                    user.getCloudflareAccountId()
+            );
+        } catch (org.springframework.web.reactive.function.client.WebClientResponseException e) {
+            if (e.getStatusCode().value() == 409) {
+                // Tunnel name already exists — fetch it from the list
+                log.warn("Tunnel '{}' already exists on Cloudflare, fetching existing tunnel", request.getName());
+                return listTunnels(userId).stream()
+                        .filter(t -> request.getName().equals(t.getName()))
+                        .findFirst()
+                        .orElseThrow(() -> new IllegalArgumentException(
+                                "Tunnel '" + request.getName() + "' conflicts but could not be found in tunnel list"));
+            }
+            throw new IllegalArgumentException("Tunnel setup failed: " + e.getMessage());
+        }
     }
 
     @SuppressWarnings("unchecked")
