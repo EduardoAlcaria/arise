@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import type { EcsCluster } from '../api/aws'
 import {
@@ -10,8 +10,14 @@ import type { AwsAccountResponse } from '../api/awsAccounts'
 import {
   Server, HardDrive, Box, Play, Square, Trash2, ChevronDown, ChevronRight,
   AlertTriangle, Loader2, RefreshCw, Plus, X, CheckCircle, Network,
-  Activity, Key, Pencil, LogIn, ExternalLink, Copy,
+  Activity, Key, Pencil, LogIn, ExternalLink, Copy, Search, Zap,
 } from 'lucide-react'
+import {
+  ReactFlow, Background, BackgroundVariant, Controls, MiniMap, Panel,
+  Handle, Position, useNodesState, useEdgesState, MarkerType,
+  type Node, type Edge,
+} from '@xyflow/react'
+import '@xyflow/react/dist/style.css'
 
 const REGIONS = [
   'us-east-1', 'us-east-2', 'us-west-1', 'us-west-2',
@@ -413,42 +419,224 @@ function EcsTab({ accountId, region }: { accountId: number; region: string }) {
 
 // ── Topology tab ──────────────────────────────────────────────────────────────
 
+// Rank defines the visual row: 0=top (VPC), 1=middle (subnet/sg), 2=compute (ec2/lambda/ecs), 3=storage
+const SVC_RANK: Record<string, number> = {
+  vpc: 0, subnet: 1, security_group: 1, ec2: 2, lambda: 2, ecs: 2, s3: 3,
+}
+const X_GAP = 260
+const Y_GAP = 170
+
+function rankLayout(nodes: Node[]): Node[] {
+  const byRank = new Map<number, Node[]>()
+  nodes.forEach(n => {
+    const rank = SVC_RANK[(n.data as any).service as string] ?? 4
+    if (!byRank.has(rank)) byRank.set(rank, [])
+    byRank.get(rank)!.push(n)
+  })
+  const out: Node[] = []
+  byRank.forEach((row, rank) => {
+    row.forEach((n, i) => {
+      out.push({ ...n, position: { x: i * X_GAP - ((row.length - 1) * X_GAP) / 2, y: rank * Y_GAP } })
+    })
+  })
+  return out
+}
+
+function awsSvcColor(svc: string): string {
+  const m: Record<string, string> = {
+    vpc: '#60a5fa', subnet: '#818cf8', security_group: '#f97316',
+    ec2: '#4ade80', lambda: '#facc15', ecs: '#c084fc', s3: '#22d3ee',
+  }
+  return m[svc] ?? '#6b7280'
+}
+
+function awsSvcIcon(svc: string) {
+  if (svc === 'ec2') return Server
+  if (svc === 'lambda') return Zap
+  if (svc === 'ecs') return Box
+  if (svc === 's3') return HardDrive
+  return Network
+}
+
+function AwsNodeCard({ data, selected }: { data: any; selected?: boolean }) {
+  const Icon = awsSvcIcon(data.service)
+  const color = awsSvcColor(data.service)
+  const isTf = data.source === 'terraform'
+
+  const stateVal = data.state ?? data.status
+  const stateColor =
+    stateVal && ['running', 'available', 'active', 'ACTIVE'].includes(stateVal) ? '#4ade80' :
+    stateVal && ['stopped', 'inactive'].includes(stateVal) ? '#f87171' : '#facc15'
+
+  const subtitle =
+    data.instanceType ? `${data.instanceType}${data.privateIp ? ' · ' + data.privateIp : ''}` :
+    data.cidr ? `${data.cidr}${data.az ? ' · ' + data.az : ''}` :
+    data.runtime ? data.runtime :
+    data.runningTasksCount != null ? `${data.runningTasksCount} tasks running` : null
+
+  return (
+    <>
+      <Handle type="target" position={Position.Top}
+        style={{ background: color, border: 'none', width: 8, height: 8 }} />
+      <div style={{
+        background: '#1c1c1e',
+        border: `1.5px solid ${selected ? color : isTf ? color + '55' : color + '28'}`,
+        borderRadius: 10, padding: '9px 13px', width: 230,
+        boxShadow: selected ? `0 0 0 2px ${color}33, 0 4px 20px ${color}22` : '0 2px 8px rgba(0,0,0,0.5)',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 7 }}>
+          <Icon size={13} style={{ color, flexShrink: 0, marginTop: 2 }} />
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: '#f1f5f9', wordBreak: 'break-all', lineHeight: 1.3 }}>
+              {data.label}
+            </div>
+            {subtitle && (
+              <div style={{ fontSize: 10, color: '#94a3b8', fontFamily: 'monospace', marginTop: 2 }}>{subtitle}</div>
+            )}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 4 }}>
+              {stateVal && (
+                <>
+                  <div style={{ width: 5, height: 5, borderRadius: '50%', background: stateColor }} />
+                  <span style={{ fontSize: 9, color: stateColor, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{stateVal}</span>
+                  <span style={{ fontSize: 9, color: '#334155' }}>·</span>
+                </>
+              )}
+              <span style={{
+                fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em',
+                color: isTf ? '#818cf8' : '#64748b',
+              }}>{isTf ? 'tf' : 'live'}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <Handle type="source" position={Position.Bottom}
+        style={{ background: color, border: 'none', width: 8, height: 8 }} />
+    </>
+  )
+}
+
+const awsNodeTypes = { awsNode: AwsNodeCard }
+
 function TopologyTab({ accountId, region }: { accountId: number; region: string }) {
-  const { data: topo, isLoading, error } = useQuery({
+  const { data: topo, isLoading, error, refetch } = useQuery({
     queryKey: ['topology', accountId, region],
     queryFn: () => getTopology(accountId, region),
   })
+
+  const [rfNodes, setRfNodes, onNodesChange] = useNodesState<Node>([])
+  const [rfEdges, setRfEdges, onEdgesChange] = useEdgesState<Edge>([])
+  const [selectedNode, setSelectedNode] = useState<any>(null)
+  const [search, setSearch] = useState('')
+  const [hiddenSvcs, setHiddenSvcs] = useState<Set<string>>(new Set())
+
+  const availableSvcs = useMemo(
+    () => topo ? [...new Set(topo.nodes.map(n => n.service))] : [],
+    [topo],
+  )
+
+  const liveCount = topo?.nodes.filter(n => n.source === 'live').length ?? 0
+  const tfCount = topo?.nodes.filter(n => n.source === 'terraform').length ?? 0
+
+  useEffect(() => {
+    if (!topo?.nodes) return
+    const q = search.trim().toLowerCase()
+    const filtered = topo.nodes
+      .filter(n => !hiddenSvcs.has(n.service))
+      .filter(n => !q || n.label.toLowerCase().includes(q) || n.service.toLowerCase().includes(q))
+    const visibleIds = new Set(filtered.map(n => n.id))
+
+    const layoutNodes: Node[] = filtered.map(n => ({
+      id: n.id, type: 'awsNode', position: { x: 0, y: 0 }, data: { ...n },
+    }))
+
+    const layoutEdges: Edge[] = topo.edges
+      .filter(e => visibleIds.has(e.source) && visibleIds.has(e.target))
+      .map((e, i) => ({
+        id: `e-${i}`, source: e.source, target: e.target, type: 'smoothstep',
+        label: e.label,
+        labelStyle: { fontSize: 9, fill: '#64748b' },
+        labelBgStyle: { fill: '#1c1c1e', fillOpacity: 0.9 },
+        labelBgPadding: [3, 2] as [number, number],
+        labelBgBorderRadius: 3,
+        markerEnd: { type: MarkerType.ArrowClosed, color: '#334155' },
+        style: { stroke: '#334155', strokeWidth: 1.5 },
+      }))
+
+    setRfNodes(rankLayout(layoutNodes))
+    setRfEdges(layoutEdges)
+  }, [topo, search, hiddenSvcs])
+
   if (isLoading) return <div className="flex items-center gap-2 text-sm text-muted-foreground py-12 justify-center"><Loader2 size={16} className="animate-spin" />Building topology…</div>
   if (error) return <div className="flex items-center gap-2 text-sm text-destructive py-12 justify-center"><AlertTriangle size={15} />{(error as any)?.response?.data?.message ?? 'Failed to load'}</div>
   if (!topo?.nodes?.length) return <div className="text-sm text-muted-foreground py-12 text-center">No topology data in {region}</div>
 
-  const byService = topo.nodes.reduce((acc: Record<string, number>, n) => {
-    const svc = n.service as string
-    acc[svc] = (acc[svc] ?? 0) + 1
-    return acc
-  }, {})
-
   return (
-    <div className="flex flex-col gap-4">
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        {Object.entries(byService).map(([svc, count]) => (
-          <div key={svc} className="bg-card border border-border rounded-xl px-4 py-3">
-            <p className="text-lg font-bold text-foreground">{count}</p>
-            <p className="text-xs text-muted-foreground capitalize">{svc.replace('_', ' ')}</p>
+    <div style={{ height: 560, position: 'relative', background: '#18181b', borderRadius: 12, overflow: 'hidden', border: '1px solid #27272a' }}>
+      <style>{`.aws-topo .react-flow__controls-button{background:#000;border-color:#333;fill:#fff}.aws-topo .react-flow__controls-button:hover{background:#111}`}</style>
+      <ReactFlow
+        className="aws-topo" nodes={rfNodes} edges={rfEdges}
+        onNodesChange={onNodesChange} onEdgesChange={onEdgesChange}
+        nodeTypes={awsNodeTypes}
+        onNodeClick={(_, node) => setSelectedNode(node)}
+        onPaneClick={() => setSelectedNode(null)}
+        fitView fitViewOptions={{ padding: 0.3 }} minZoom={0.08}
+        style={{ background: 'transparent' }}
+      >
+        <Background variant={BackgroundVariant.Dots} gap={24} size={1.5} color="#3f3f46" />
+        <Controls style={{ background: '#1e293b', border: '1px solid #334155' }} />
+        <MiniMap nodeStrokeWidth={3} pannable zoomable style={{ background: '#1e293b', border: '1px solid #334155' }} />
+        <Panel position="top-left">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, background: '#27272a', border: '1px solid #334155', borderRadius: 10, padding: '10px 12px', minWidth: 210, boxShadow: '0 2px 16px rgba(0,0,0,0.5)' }}>
+            <div style={{ position: 'relative' }}>
+              <Search size={12} style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', color: '#64748b', pointerEvents: 'none' }} />
+              <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search nodes…"
+                style={{ width: '100%', padding: '5px 8px 5px 26px', background: '#18181b', border: '1px solid #3f3f46', borderRadius: 6, fontSize: 12, color: '#f1f5f9', outline: 'none', boxSizing: 'border-box' }} />
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              {liveCount > 0
+                ? <span style={{ fontSize: 10, fontWeight: 700, color: '#4ade80', background: '#4ade8015', padding: '2px 7px', borderRadius: 4 }}>{liveCount} live</span>
+                : <span style={{ fontSize: 10, color: '#f87171', background: '#f8717115', padding: '2px 7px', borderRadius: 4 }}>⚠ no live data</span>}
+              {tfCount > 0 && <span style={{ fontSize: 10, fontWeight: 700, color: '#818cf8', background: '#818cf815', padding: '2px 7px', borderRadius: 4 }}>{tfCount} tf</span>}
+              <button onClick={() => refetch()} title="Refresh" style={{ marginLeft: 'auto', background: 'none', border: 'none', color: '#475569', cursor: 'pointer', fontSize: 13, lineHeight: 1 }}>↻</button>
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+              {availableSvcs.map(svc => {
+                const active = !hiddenSvcs.has(svc)
+                const Icon = awsSvcIcon(svc)
+                const color = awsSvcColor(svc)
+                return (
+                  <button key={svc} onClick={() => setHiddenSvcs(prev => { const s = new Set(prev); s.has(svc) ? s.delete(svc) : s.add(svc); return s })}
+                    style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '3px 8px', borderRadius: 20, fontSize: 11, fontWeight: 500, border: `1px solid ${active ? color : '#334155'}`, background: active ? color + '20' : 'transparent', color: active ? color : '#64748b', cursor: 'pointer' }}>
+                    <Icon size={10} />{svc.replace('_', ' ')}
+                  </button>
+                )
+              })}
+            </div>
           </div>
-        ))}
-      </div>
-      <div className="flex flex-col gap-2">
-        {topo.nodes.slice(0, 20).map(n => (
-          <div key={n.id} className={`flex items-center gap-3 px-3 py-2 rounded-lg border text-xs ${n.source === 'terraform' ? 'border-primary/30 bg-primary/5' : 'border-border bg-muted/20'}`}>
-            <Network size={11} className="text-muted-foreground shrink-0" />
-            <span className="font-medium text-foreground truncate flex-1">{n.label as string}</span>
-            <span className="text-muted-foreground capitalize shrink-0">{n.service as string}</span>
-            <span className={`text-[10px] px-1.5 py-0.5 rounded-full shrink-0 ${n.source === 'terraform' ? 'bg-primary/15 text-primary' : 'bg-muted text-muted-foreground'}`}>{n.source as string}</span>
+        </Panel>
+      </ReactFlow>
+      {selectedNode && (
+        <div style={{ position: 'absolute', top: 16, right: 16, width: 260, zIndex: 10, background: '#27272a', border: '1px solid #334155', borderRadius: 12, padding: 16, boxShadow: '0 4px 24px rgba(0,0,0,0.6)', maxHeight: '80%', overflowY: 'auto' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <span style={{ fontWeight: 600, fontSize: 13, color: '#f1f5f9' }}>{selectedNode.data.label}</span>
+            <button onClick={() => setSelectedNode(null)} style={{ color: '#94a3b8', background: 'none', border: 'none', cursor: 'pointer' }}>✕</button>
           </div>
-        ))}
-        {topo.nodes.length > 20 && <p className="text-xs text-muted-foreground text-center">{topo.nodes.length - 20} more resources…</p>}
-      </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {Object.entries(selectedNode.data as Record<string, unknown>)
+              .filter(([k, v]) => k !== 'id' && k !== 'label' && v != null && v !== '')
+              .map(([k, v]) => (
+                <div key={k}>
+                  <div style={{ fontSize: 10, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    {k.replace(/([A-Z])/g, ' $1').trim()}
+                  </div>
+                  <div style={{ fontSize: 12, color: '#e2e8f0', fontFamily: 'monospace', wordBreak: 'break-all', marginTop: 1 }}>
+                    {String(v)}
+                  </div>
+                </div>
+              ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -462,7 +650,18 @@ function TracesTab({ accountId, region }: { accountId: number; region: string })
     queryFn: () => listTraces(accountId, region, minutes),
   })
   if (isLoading) return <div className="flex items-center gap-2 text-sm text-muted-foreground py-12 justify-center"><Loader2 size={16} className="animate-spin" />Loading traces…</div>
-  if (error) return <div className="flex items-center gap-2 text-sm text-destructive py-12 justify-center"><AlertTriangle size={15} />{(error as any)?.response?.data?.message ?? 'X-Ray not available or no traces'}</div>
+  if (error) {
+    const msg: string = (error as any)?.response?.data?.message ?? (error as any)?.message ?? ''
+    const noPermission = msg.includes('not authorized') || msg.includes('xray:')
+    return (
+      <div className="flex flex-col items-center gap-2 text-sm py-12 text-center text-muted-foreground">
+        <AlertTriangle size={20} className={noPermission ? 'text-amber-400' : 'text-destructive'} />
+        {noPermission
+          ? <><p className="font-medium">X-Ray permission missing</p><p className="text-xs max-w-sm">Add <code className="font-mono text-xs bg-muted px-1 rounded">xray:GetTraceSummaries</code> to your IAM role policy to use this feature.</p></>
+          : <p>{msg || 'Failed to load traces'}</p>}
+      </div>
+    )
+  }
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center gap-3">
