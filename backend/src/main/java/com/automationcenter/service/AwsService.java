@@ -91,6 +91,29 @@ public class AwsService {
                 .toList();
     }
 
+    public AwsAccountResponse updateAccount(Long userId, Long accountId, AwsAccountRequest req) {
+        AwsAccount account = getAccount(accountId, userId);
+        account.setName(req.getName());
+        account.setProfileName(req.getProfileName());
+        account.setDefaultRegion(req.getRegion());
+        account.setTerraformRepoUrl(req.getTerraformRepoUrl());
+        account = accountRepository.save(account);
+        boolean reachable = false;
+        String awsAccountId = null;
+        try {
+            GetCallerIdentityResponse id = StsClient.builder()
+                    .credentialsProvider(ProfileCredentialsProvider.create(req.getProfileName()))
+                    .region(Region.of(req.getRegion()))
+                    .build()
+                    .getCallerIdentity();
+            reachable = true;
+            awsAccountId = id.account();
+        } catch (Exception e) {
+            log.warn("Profile '{}' not reachable after update: {}", req.getProfileName(), e.getMessage());
+        }
+        return toResponse(account, reachable, awsAccountId);
+    }
+
     public void deleteAccount(Long userId, Long accountId) {
         AwsAccount account = getAccount(accountId, userId);
         accountRepository.delete(account);

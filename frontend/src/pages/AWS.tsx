@@ -5,12 +5,12 @@ import {
   listEc2Instances, listS3Buckets, listEcsClusters, listEcsServices,
   startInstance, stopInstance, terminateInstance, listTraces, getTopology,
 } from '../api/aws'
-import { listAwsAccounts, createAwsAccount, deleteAwsAccount } from '../api/awsAccounts'
+import { listAwsAccounts, createAwsAccount, updateAwsAccount, deleteAwsAccount } from '../api/awsAccounts'
 import type { AwsAccountResponse } from '../api/awsAccounts'
 import {
   Server, HardDrive, Box, Play, Square, Trash2, ChevronDown, ChevronRight,
   AlertTriangle, Loader2, RefreshCw, Plus, X, CheckCircle, XCircle, Network,
-  Activity, Key,
+  Activity, Key, Pencil,
 } from 'lucide-react'
 
 const REGIONS = [
@@ -28,10 +28,11 @@ function stateColor(state: string) {
 
 // ── Account card ─────────────────────────────────────────────────────────────
 
-function AccountCard({ account, selected, onSelect, onDelete }: {
+function AccountCard({ account, selected, onSelect, onEdit, onDelete }: {
   account: AwsAccountResponse
   selected: boolean
   onSelect: () => void
+  onEdit: () => void
   onDelete: () => void
 }) {
   return (
@@ -52,8 +53,16 @@ function AccountCard({ account, selected, onSelect, onDelete }: {
           ? <CheckCircle size={14} className="text-green-400" />
           : <XCircle size={14} className="text-destructive" />}
         <button
+          onClick={e => { e.stopPropagation(); onEdit() }}
+          className="p-1 rounded text-muted-foreground hover:text-foreground transition-colors"
+          title="Edit account"
+        >
+          <Pencil size={12} />
+        </button>
+        <button
           onClick={e => { e.stopPropagation(); onDelete() }}
           className="p-1 rounded text-muted-foreground hover:text-destructive transition-colors"
+          title="Delete account"
         >
           <Trash2 size={12} />
         </button>
@@ -64,15 +73,19 @@ function AccountCard({ account, selected, onSelect, onDelete }: {
 
 // ── Register modal ────────────────────────────────────────────────────────────
 
-function RegisterModal({ onClose }: { onClose: () => void }) {
+function RegisterModal({ onClose, editing }: { onClose: () => void; editing?: AwsAccountResponse }) {
   const qc = useQueryClient()
-  const [name, setName] = useState('')
-  const [profileName, setProfileName] = useState('')
-  const [region, setRegion] = useState('us-east-1')
-  const [terraformRepoUrl, setTerraformRepoUrl] = useState('')
+  const [name, setName] = useState(editing?.name ?? '')
+  const [profileName, setProfileName] = useState(editing?.profileName ?? '')
+  const [region, setRegion] = useState(editing?.defaultRegion ?? 'us-east-1')
+  const [terraformRepoUrl, setTerraformRepoUrl] = useState(editing?.terraformRepoUrl ?? '')
+
+  const isEdit = editing != null
 
   const mut = useMutation({
-    mutationFn: () => createAwsAccount({ name, profileName, region, terraformRepoUrl: terraformRepoUrl || undefined }),
+    mutationFn: () => isEdit
+      ? updateAwsAccount(editing.id, { name, profileName, region, terraformRepoUrl: terraformRepoUrl || undefined })
+      : createAwsAccount({ name, profileName, region, terraformRepoUrl: terraformRepoUrl || undefined }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['aws-accounts'] })
       onClose()
@@ -83,7 +96,7 @@ function RegisterModal({ onClose }: { onClose: () => void }) {
     <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
       <div className="bg-card border border-border rounded-2xl w-full max-w-md shadow-xl">
         <div className="px-5 py-4 border-b border-border flex items-center justify-between">
-          <p className="text-sm font-semibold text-foreground">Register AWS Account</p>
+          <p className="text-sm font-semibold text-foreground">{isEdit ? 'Edit AWS Account' : 'Register AWS Account'}</p>
           <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors"><X size={16} /></button>
         </div>
         <div className="px-5 py-5 flex flex-col gap-4">
@@ -114,7 +127,7 @@ function RegisterModal({ onClose }: { onClose: () => void }) {
           {mut.isError && (
             <div className="flex gap-2 items-center rounded-lg px-3 py-2 text-xs text-destructive border border-destructive/20 bg-destructive/5">
               <AlertTriangle size={12} className="shrink-0" />
-              {(mut.error as any)?.response?.data?.message ?? (mut.error as any)?.message ?? 'Failed to register'}
+              {(mut.error as any)?.response?.data?.message ?? (mut.error as any)?.message ?? (isEdit ? 'Failed to update' : 'Failed to register')}
             </div>
           )}
 
@@ -125,7 +138,9 @@ function RegisterModal({ onClose }: { onClose: () => void }) {
               disabled={mut.isPending || !name.trim() || !profileName.trim()}
               className="flex items-center gap-2 px-5 py-2 bg-primary text-primary-foreground text-sm font-semibold rounded-lg hover:opacity-90 disabled:opacity-50 transition-all"
             >
-              {mut.isPending ? <><Loader2 size={13} className="animate-spin" />Registering…</> : <><Plus size={13} />Register</>}
+              {mut.isPending
+                ? <><Loader2 size={13} className="animate-spin" />{isEdit ? 'Saving…' : 'Registering…'}</>
+                : isEdit ? <><Pencil size={13} />Save Changes</> : <><Plus size={13} />Register</>}
             </button>
           </div>
         </div>
@@ -387,6 +402,7 @@ type Tab = 'ec2' | 's3' | 'ecs' | 'topology' | 'traces'
 export default function AWS() {
   const qc = useQueryClient()
   const [showRegister, setShowRegister] = useState(false)
+  const [editingAccount, setEditingAccount] = useState<AwsAccountResponse | null>(null)
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [tab, setTab] = useState<Tab>('ec2')
   const [region, setRegion] = useState('us-east-1')
@@ -420,6 +436,7 @@ export default function AWS() {
   return (
     <div className="p-6 max-w-6xl mx-auto">
       {showRegister && <RegisterModal onClose={() => setShowRegister(false)} />}
+      {editingAccount && <RegisterModal editing={editingAccount} onClose={() => setEditingAccount(null)} />}
 
       {/* Account list */}
       <div className="mb-5">
@@ -451,6 +468,7 @@ export default function AWS() {
                 account={a}
                 selected={selected?.id === a.id}
                 onSelect={() => setSelectedId(a.id)}
+                onEdit={() => setEditingAccount(a)}
                 onDelete={() => deleteMut.mutate(a.id)}
               />
             ))}
