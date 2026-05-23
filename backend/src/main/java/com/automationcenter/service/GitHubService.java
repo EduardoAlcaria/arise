@@ -56,7 +56,10 @@ public class GitHubService {
             return github.getMyself().listRepositories().toList().stream()
                     .map(repo -> {
                         try {
-                            String updatedAt = repo.getUpdatedAt() != null ? repo.getUpdatedAt().toString() : null;
+                            String updatedAt = repo.getUpdatedAt() != null
+                                    ? repo.getUpdatedAt().toInstant().toString() : null;
+                            String pushedAt = repo.getPushedAt() != null
+                                    ? repo.getPushedAt().toInstant().toString() : null;
                             return new GitHubRepoResponse(
                                     repo.getName(),
                                     repo.getFullName(),
@@ -66,7 +69,8 @@ public class GitHubService {
                                     repo.getDefaultBranch(),
                                     repo.getLanguage(),
                                     repo.getStargazersCount(),
-                                    updatedAt
+                                    updatedAt,
+                                    pushedAt
                             );
                         } catch (IOException e) {
                             return new GitHubRepoResponse(
@@ -78,6 +82,7 @@ public class GitHubService {
                                     repo.getDefaultBranch(),
                                     null,
                                     0,
+                                    null,
                                     null
                             );
                         }
