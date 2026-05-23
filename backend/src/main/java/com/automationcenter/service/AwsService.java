@@ -11,6 +11,8 @@ import com.automationcenter.repository.AwsAccountRepository;
 import com.automationcenter.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+
+import org.bouncycastle.asn1.dvcs.Data;
 import org.springframework.stereotype.Service;
 import software.amazon.awssdk.auth.credentials.AnonymousCredentialsProvider;
 import software.amazon.awssdk.auth.credentials.ProfileCredentialsProvider;
@@ -90,7 +92,7 @@ public class AwsService {
     public List<AwsAccountResponse> listAccounts(Long userId) {
         return accountRepository.findByOwnerId(userId).stream()
                 .map(a -> {
-                    if (DataSeeder.DEMO_PROFILE.equals(a.getProfileName()))
+                    if (DataSeeder.getDemoProfile().equals(a.getProfileName()))
                         return toResponse(a, true, "123456789012");
                     boolean reachable = false;
                     String accountId = null;
@@ -293,7 +295,7 @@ public class AwsService {
     public List<Map<String, Object>> listEc2Instances(Long userId, Long accountId, String region) {
         AwsAccount account = getAccount(accountId, userId);
         String effectiveRegion = region != null ? region : account.getDefaultRegion();
-        if (DataSeeder.DEMO_PROFILE.equals(account.getProfileName()))
+        if (DataSeeder.getDemoProfile().equals(account.getProfileName()))
             return MockAwsData.ec2Instances(effectiveRegion);
         try (Ec2Client ec2 = buildEc2Client(account, effectiveRegion)) {
             return ec2.describeInstances().reservations().stream()
@@ -355,7 +357,7 @@ public class AwsService {
 
     public List<Map<String, Object>> listS3Buckets(Long userId, Long accountId) {
         AwsAccount account = getAccount(accountId, userId);
-        if (DataSeeder.DEMO_PROFILE.equals(account.getProfileName()))
+        if (DataSeeder.getDemoProfile().equals(account.getProfileName()))
             return MockAwsData.s3Buckets();
         try (S3Client s3 = S3Client.builder()
                 .credentialsProvider(credentialsFor(account))
@@ -379,7 +381,7 @@ public class AwsService {
     public List<Map<String, Object>> listEcsClusters(Long userId, Long accountId, String region) {
         AwsAccount account = getAccount(accountId, userId);
         String effectiveRegion = region != null ? region : account.getDefaultRegion();
-        if (DataSeeder.DEMO_PROFILE.equals(account.getProfileName()))
+        if (DataSeeder.getDemoProfile().equals(account.getProfileName()))
             return MockAwsData.ecsClusters(effectiveRegion);
         try (EcsClient ecs = buildEcsClient(account, effectiveRegion)) {
             List<String> arns = ecs.listClusters().clusterArns();
@@ -405,7 +407,7 @@ public class AwsService {
     public List<Map<String, Object>> listEcsServices(Long userId, Long accountId, String clusterArn, String region) {
         AwsAccount account = getAccount(accountId, userId);
         String effectiveRegion = region != null ? region : account.getDefaultRegion();
-        if (DataSeeder.DEMO_PROFILE.equals(account.getProfileName()))
+        if (DataSeeder.getDemoProfile().equals(account.getProfileName()))
             return MockAwsData.ecsServices(clusterArn);
         try (EcsClient ecs = buildEcsClient(account, effectiveRegion)) {
             List<String> arns = ecs.listServices(ListServicesRequest.builder().cluster(clusterArn).build()).serviceArns();
@@ -433,7 +435,7 @@ public class AwsService {
     public List<Map<String, Object>> listTraces(Long userId, Long accountId, String region, int minutes) {
         AwsAccount account = getAccount(accountId, userId);
         String effectiveRegion = region != null ? region : account.getDefaultRegion();
-        if (DataSeeder.DEMO_PROFILE.equals(account.getProfileName()))
+        if (DataSeeder.getDemoProfile().equals(account.getProfileName()))
             return MockAwsData.traces();
         try (XRayClient xray = XRayClient.builder()
                 .credentialsProvider(credentialsFor(account))
