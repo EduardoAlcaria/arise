@@ -42,8 +42,8 @@ import software.amazon.awssdk.services.xray.XRayClient;
 import software.amazon.awssdk.services.xray.model.BatchGetTracesRequest;
 import software.amazon.awssdk.services.xray.model.GetTraceSummariesRequest;
 import software.amazon.awssdk.services.xray.model.Trace;
+import org.springframework.cache.CacheManager;
 import org.springframework.cache.annotation.Cacheable;
-import org.springframework.data.redis.core.RedisTemplate;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
@@ -53,7 +53,6 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 @Service
 @RequiredArgsConstructor
@@ -62,7 +61,7 @@ public class AwsService {
 
     private final AwsAccountRepository accountRepository;
     private final UserRepository userRepository;
-    private final RedisTemplate<String, Object> redisTemplate;
+    private final CacheManager cacheManager;
 
     // ── Account CRUD ──────────────────────────────────────────────────────────
 
@@ -553,8 +552,12 @@ public class AwsService {
     public void evictAccount(Long accountId) {
         for (String cacheName : List.of("aws-ec2", "aws-s3", "aws-ecs", "aws-ecs-services",
                 "aws-topology", "aws-explorer", "aws-traces")) {
-            Set<String> keys = redisTemplate.keys(cacheName + "::" + accountId + "*");
-            if (keys != null && !keys.isEmpty()) redisTemplate.delete(keys);
+            try {
+                org.springframework.cache.Cache cache = cacheManager.getCache(cacheName);
+                if (cache != null) cache.clear();
+            } catch (Exception e) {
+                log.warn("Failed to evict cache {}: {}", cacheName, e.getMessage());
+            }
         }
     }
 }
