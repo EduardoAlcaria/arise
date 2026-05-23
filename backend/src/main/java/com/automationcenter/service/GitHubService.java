@@ -121,7 +121,9 @@ public class GitHubService {
                     .block();
 
             if (response == null) return "";
-            String b64 = ((String) response.get("content")).replaceAll("\\s", "");
+            Object contentObj = response.get("content");
+            if (contentObj == null) return "";
+            String b64 = ((String) contentObj).replaceAll("\\s", "");
             return new String(Base64.getDecoder().decode(b64), StandardCharsets.UTF_8);
         } catch (Exception e) {
             log.warn("Could not fetch README for {}/{}: {}", owner, repo, e.getMessage());
