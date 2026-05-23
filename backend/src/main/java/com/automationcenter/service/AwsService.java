@@ -42,6 +42,8 @@ import software.amazon.awssdk.services.xray.XRayClient;
 import software.amazon.awssdk.services.xray.model.BatchGetTracesRequest;
 import software.amazon.awssdk.services.xray.model.GetTraceSummariesRequest;
 import software.amazon.awssdk.services.xray.model.Trace;
+import org.springframework.cache.annotation.Cacheable;
+import org.springframework.data.redis.core.RedisTemplate;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
@@ -51,6 +53,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 @Service
 @RequiredArgsConstructor
@@ -59,6 +62,7 @@ public class AwsService {
 
     private final AwsAccountRepository accountRepository;
     private final UserRepository userRepository;
+    private final RedisTemplate<String, Object> redisTemplate;
 
     // ── Account CRUD ──────────────────────────────────────────────────────────
 
@@ -292,6 +296,7 @@ public class AwsService {
 
     // ── EC2 ───────────────────────────────────────────────────────────────────
 
+    @Cacheable(value = "aws-ec2", key = "#accountId + ':' + #region")
     public List<Map<String, Object>> listEc2Instances(Long userId, Long accountId, String region) {
         AwsAccount account = getAccount(accountId, userId);
         String effectiveRegion = region != null ? region : account.getDefaultRegion();
@@ -307,6 +312,8 @@ public class AwsService {
                         item.put("state", i.state().nameAsString());
                         item.put("publicIp", i.publicIpAddress());
                         item.put("privateIp", i.privateIpAddress());
+                        item.put("vpcId", i.vpcId());
+                        item.put("subnetId", i.subnetId());
                         item.put("launchTime", i.launchTime() != null ? i.launchTime().toString() : null);
                         item.put("platform", i.platformDetails());
                         String name = i.tags().stream()
@@ -355,6 +362,7 @@ public class AwsService {
 
     // ── S3 ────────────────────────────────────────────────────────────────────
 
+    @Cacheable(value = "aws-s3", key = "#accountId")
     public List<Map<String, Object>> listS3Buckets(Long userId, Long accountId) {
         AwsAccount account = getAccount(accountId, userId);
         if (DataSeeder.getDemoProfile().equals(account.getProfileName()))
@@ -378,6 +386,7 @@ public class AwsService {
 
     // ── ECS ───────────────────────────────────────────────────────────────────
 
+    @Cacheable(value = "aws-ecs", key = "#accountId + ':' + #region")
     public List<Map<String, Object>> listEcsClusters(Long userId, Long accountId, String region) {
         AwsAccount account = getAccount(accountId, userId);
         String effectiveRegion = region != null ? region : account.getDefaultRegion();
@@ -404,6 +413,7 @@ public class AwsService {
         }
     }
 
+    @Cacheable(value = "aws-ecs-services", key = "#accountId + ':' + #clusterArn")
     public List<Map<String, Object>> listEcsServices(Long userId, Long accountId, String clusterArn, String region) {
         AwsAccount account = getAccount(accountId, userId);
         String effectiveRegion = region != null ? region : account.getDefaultRegion();
@@ -432,6 +442,7 @@ public class AwsService {
 
     // ── X-Ray Traces ──────────────────────────────────────────────────────────
 
+    @Cacheable(value = "aws-traces", key = "#accountId + ':' + #region + ':' + #minutes")
     public List<Map<String, Object>> listTraces(Long userId, Long accountId, String region, int minutes) {
         AwsAccount account = getAccount(accountId, userId);
         String effectiveRegion = region != null ? region : account.getDefaultRegion();
@@ -537,5 +548,13 @@ public class AwsService {
                 .reachable(reachable)
                 .accountId(awsAccountId)
                 .build();
+    }
+
+    public void evictAccount(Long accountId) {
+        for (String cacheName : List.of("aws-ec2", "aws-s3", "aws-ecs", "aws-ecs-services",
+                "aws-topology", "aws-explorer", "aws-traces")) {
+            Set<String> keys = redisTemplate.keys(cacheName + "::" + accountId + "*");
+            if (keys != null && !keys.isEmpty()) redisTemplate.delete(keys);
+        }
     }
 }
