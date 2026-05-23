@@ -20,9 +20,9 @@ Everything is scoped per-user. There are no organisations or teams yet — all d
 | Backend | Java 21, Spring Boot 3.3.5, Spring Security (JWT stateless), Spring Data JPA, Spring WebFlux (WebClient) |
 | Database | PostgreSQL (managed by Docker Compose) |
 | ORM | Hibernate via JPA. Lombok for boilerplate. |
-| Async | `@Async` Spring tasks + RabbitMQ (`amqp`) for deployment notifications |
+| Async | RabbitMQ (`spring-amqp`): three queues — `deployment.run.queue` (execution), `deployment.queue` (events), `hooks.queue` (post-deploy webhooks) |
 | SSH | JSch (com.jcraft.jsch) |
-| GitHub API | kohsuke/github-api + raw WebClient for Actions endpoints |
+| GitHub API | kohsuke/github-api + WebClient for file content, README, Actions endpoints |
 | Frontend | React 19, Vite, TypeScript, Tailwind v4, TanStack Query v5, React Router v7, Zustand |
 | UI components | Lucide icons, React Flow (`@xyflow/react`) for topology, Dagre for auto-layout |
 | Infra | Docker Compose — postgres, rabbitmq, backend, frontend (nginx) |
@@ -40,6 +40,8 @@ AutomationHub/
 │       ├── dto/               Request/response DTOs (never expose entities)
 │       ├── service/           All business logic lives here
 │       ├── controller/        Thin REST controllers — delegate to services
+│       ├── listener/          RabbitMQ listeners (DeploymentRunListener, DeploymentEventListener, PostDeployHookListener)
+│       ├── websocket/         SSH terminal (SshTerminalHandler) + WS notifications (NotificationHandler)
 │       ├── security/          JwtService, JwtAuthFilter, UserDetailsServiceImpl
 │       ├── config/            SecurityConfig, WebSocketConfig, RabbitMQConfig
 │       └── exception/         GlobalExceptionHandler, ApiError, custom exceptions
@@ -47,6 +49,7 @@ AutomationHub/
 │   └── src/
 │       ├── pages/             One file per page/route
 │       ├── components/        Shared UI components
+│       ├── hooks/             Custom hooks (useDeploymentNotifications)
 │       ├── api/               Axios wrappers per domain
 │       ├── stores/            Zustand stores (authStore only)
 │       └── types/index.ts     All shared TypeScript types
@@ -96,14 +99,14 @@ Business rules live exclusively in services. Controllers are thin wrappers.
 | `AuthService` | Register (unique email), login, issue JWT |
 | `MachineService` | CRUD for machines, test SSH ping, `@Scheduled` health check every 5 min |
 | `SshService` | Execute a shell command via SSH (`execute`), write a file via base64 shell pipe (`writeFileViaShell`). Handles DIRECT/CLOUDFLARE_TCP/PROXY_COMMAND tunnel modes. |
-| `DeploymentService` | Create deployment, run `@Async executeAsync`, rollback, redeploy, delete, add/remove tunnel |
+| `DeploymentService` | Create deployment (publishes to `deployment.run.queue` via `afterCommit`), `executeAsync` (called by listener), rollback, redeploy, delete, add/remove tunnel |
 | `ContainerDeploymentService` | Deploy a Docker image on a machine via SSH (docker run) |
 | `LogService` | Append log entry to DB + broadcast via `LogBroadcaster` |
 | `LogBroadcaster` | SSE pub/sub — holds `ConcurrentHashMap<deploymentId, Set<SseEmitter>>`. `publish()` fans out to all connected clients. `complete()` signals stream end. |
-| `GitHubService` | List repos, branches, tree (recursive), README, env var keys, runner registration token. Uses kohsuke library + WebClient for Actions endpoints. |
+| `GitHubService` | List repos (ISO-8601 dates for correct sort), branches, file tree, README (WebClient), file content, env var keys, runner registration token. |
 | `CloudflareService` | Save/validate token, list zones, create/configure/delete tunnel, get tunnel token, create DNS CNAME |
 | `InfisicalService` | Save credentials, authenticate (get bearer token), list/get secrets |
-| `CicdService` | detectWorkflows, getWorkflowRuns, rerunWorkflow, triggerWorkflow, getWorkflowJobs, listRunners, deleteRunner, setupRunner (async, SSH) |
+| `CicdService` | detectWorkflows, getWorkflowRuns, rerunWorkflow, triggerWorkflow, getWorkflowJobs, listRunners (per-repo), listAllRunners (aggregated across all repos via parallelStream), deleteRunner, setupRunner (async, SSH) |
 | `TopologyService` | Build graph of machines → deployments → tunnels + containers from DB |
 | `DockerService` | Docker container lifecycle (stop/start/remove/logs) via SSH |
 
@@ -163,6 +166,7 @@ GitHub
   GET    /api/github/repos/{owner}/{repo}/branches
   GET    /api/github/repos/{owner}/{repo}/readme
   GET    /api/github/repos/{owner}/{repo}/tree/{branch}
+  GET    /api/github/repos/{owner}/{repo}/file?path=&branch=
   GET    /api/github/repos/{owner}/{repo}/env-vars/{branch}
   POST   /api/github/token
 
@@ -172,6 +176,7 @@ CI/CD
   POST   /api/cicd/runs/{owner}/{repo}/{runId}/rerun
   POST   /api/cicd/workflows/{owner}/{repo}/{workflowId}/dispatch?ref=
   GET    /api/cicd/jobs/{owner}/{repo}/{runId}
+  GET    /api/cicd/runners                          (all repos, aggregated)
   GET    /api/cicd/runners/{owner}/{repo}
   DELETE /api/cicd/runners/{owner}/{repo}/{runnerId}
   POST   /api/cicd/runner/{owner}/{repo}/setup?machineId=
@@ -192,7 +197,8 @@ Topology
   GET    /api/topology
 
 WebSocket
-  WS     /ws/ssh/{machineId}   (SSH terminal)
+  WS     /ws/terminal/{machineId}   (SSH terminal relay)
+  WS     /ws/notifications          (deployment completion push — invalidates browser caches)
 ```
 
 ### 4.6 Authentication
@@ -243,9 +249,13 @@ All authenticated routes are children of `/` which renders `Layout`. `ProtectedR
 ### 5.2 State management
 
 **Server state:** TanStack Query. All API calls are `useQuery`/`useMutation`. Query keys:
-- `['machines']`, `['containers']`, `['deployments']`, `['topology']`
-- `['cicd-runs', owner, repo]`, `['cicd-workflows', owner, repo]`, `['cicd-runners', owner, repo]`
+- `['machines']`, `['containers']`, `['deployments-all']`, `['topology']`
+- `['cicd-runs', owner, repo]`, `['cicd-workflows', owner, repo]`, `['cicd-runners', owner, repo]`, `['cicd-runners-all']`
 - `['cicd-jobs', owner, repo, runId]`
+- `['dep-watch-status', deploymentId]` — polled by `DeploymentWatcher` during active deployment
+- `['github-repos']`, `['github-branches', owner, repo]`, `['github-readme', owner, repo]`, `['github-tree', owner, repo, branch]`, `['github-file', owner, repo, path, branch]`
+
+**Cache invalidation:** The `useDeploymentNotifications` hook (active in `Layout.tsx`) connects to `/ws/notifications`. On `DEPLOYMENT_UPDATE` message, it invalidates `['deployments-all']` and `['dep-watch-status', id]` instantly across all open tabs.
 
 **Auth state:** Zustand (`useAuthStore`) — holds `{ user, token, login, logout }`. Token persisted to `localStorage`.
 
@@ -290,8 +300,8 @@ Every service method that queries data takes `ownerId` as a parameter and passes
 
 ### 6.3 Deployment flow
 
-1. `POST /api/deployments` → `DeploymentService.create()` → saves record with `PENDING` → calls `executeAsync(id)` → returns immediately
-2. `executeAsync` runs in a Spring async thread:
+1. `POST /api/deployments` → `DeploymentService.create()` (annotated `@Transactional`) → saves record with `PENDING` → registers `TransactionSynchronization.afterCommit()` to publish deployment ID to `deployment.run.exchange`. Returns immediately.
+2. `DeploymentRunListener.onRunDeployment()` picks up the message from `deployment.run.queue` and calls `deploymentService.executeAsync(id)`:
    - Sets status to `BUILDING`
    - Detects OS on remote machine (`uname -s`)
    - Injects GitHub token into clone URL for auth
@@ -300,7 +310,14 @@ Every service method that queries data takes `ownerId` as a parameter and passes
    - Runs build command (`docker compose up -d --build` for compose, `npm run build` for Node, etc.)
    - Optionally creates Cloudflare tunnel
    - Sets status to `SUCCESS` or `FAILED`
-3. Frontend streams logs in real time via SSE (`GET /api/deployments/{id}/logs`) through `DeploymentWatcher.tsx`
+   - Publishes `"DEPLOYMENT_SUCCESS:id"` or `"DEPLOYMENT_FAILED:id"` to `deployment.exchange`
+3. `DeploymentEventListener.onDeploymentEvent()` receives the event:
+   - Broadcasts `{"type":"DEPLOYMENT_UPDATE","deploymentId":N,"status":"SUCCESS"}` via `/ws/notifications` WebSocket to all connected browser tabs
+   - On SUCCESS: also publishes to `hooks.queue` for post-deploy processing
+4. Frontend streams logs live via SSE (`GET /api/deployments/{id}/logs/stream`) through `DeploymentWatcher.tsx`
+5. On completion, the WS push invalidates `['deployments-all']` — deployment list refreshes automatically
+
+**Race condition prevention:** The `afterCommit()` hook guarantees the deployment row is committed to DB before the RabbitMQ message fires, so the listener can always find the record via `findById`.
 
 **Rollback:** SSH `docker compose down` in `deployDir` of the old deployment, then `docker compose up -d` in the previous deployment's `deployDir`.
 
@@ -421,6 +438,6 @@ Schema is managed by Hibernate `ddl-auto=update` — it creates/updates tables o
 | Tokens stored plaintext | `githubToken`, `cloudflareToken`, `privateKey` are plain text in DB. Infisical integration exists but key/token storage isn't encrypted through it yet. |
 | No tests | Zero unit or integration tests currently. |
 | CORS hardcoded | `SecurityConfig` allows only `localhost:3000` and `localhost:5173`. Production deployments need this updated. |
-| RabbitMQ notifications ignored | `DeploymentService` publishes to RabbitMQ on success/failure, but nothing consumes it in production. The queue is there for future use. |
+| Post-deploy webhooks not wired | `PostDeployHookListener` logs a placeholder — no real HTTP call to a webhook URL yet. |
 | Runner setup is fire-and-forget | `setupRunner` returns 202 immediately; there's no way to see the SSH output from the UI. |
 | Deployment type APPLICATION | Multi-repo application deploys store services/configs as JSON blobs in `applicationServices` and `applicationConfigs` columns. |
