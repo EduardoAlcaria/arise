@@ -78,6 +78,7 @@ export interface GitHubRepo {
   language: string | null
   stargazersCount: number
   updatedAt: string | null
+  pushedAt: string | null
 }
 
 export interface GitHubBranch {
