@@ -146,6 +146,34 @@ public class GitHubService {
         }
     }
 
+    public String getFileContent(Long userId, String owner, String repo, String path, String branch) {
+        User user = getUser(userId);
+        try {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> response = webClientBuilder.build()
+                    .get()
+                    .uri(uriBuilder -> uriBuilder
+                            .scheme("https").host("api.github.com")
+                            .path("/repos/{owner}/{repo}/contents/{path}")
+                            .queryParam("ref", branch)
+                            .build(owner, repo, path))
+                    .header("Authorization", "token " + user.getGithubToken())
+                    .header("Accept", "application/vnd.github+json")
+                    .retrieve()
+                    .bodyToMono(Map.class)
+                    .block();
+
+            if (response == null) return "";
+            Object contentObj = response.get("content");
+            if (contentObj == null) return "";
+            String b64 = ((String) contentObj).replaceAll("\\s", "");
+            return new String(Base64.getDecoder().decode(b64), StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            log.warn("Could not fetch file {}/{}/{}: {}", owner, repo, path, e.getMessage());
+            return "";
+        }
+    }
+
     public List<String> getEnvVarKeys(Long userId, String owner, String repo, String branch) {
         User user = getUser(userId);
         try {

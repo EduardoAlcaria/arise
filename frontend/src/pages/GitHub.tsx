@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { createDeployment } from '../api/deployments'
-import { getRepos, getBranches, getRepoReadme, getRepoTree } from '../api/github'
+import { getRepos, getBranches, getRepoReadme, getRepoTree, getFileContent } from '../api/github'
 import { getMachines } from '../api/machines'
 import { Search, Star, GitBranch, Lock, Unlock, X, ChevronDown, ChevronRight, Rocket, Link2Off, FileText, Folder } from 'lucide-react'
 import { GitHubIcon } from '../components/icons'
@@ -18,13 +18,59 @@ const LANG_COLORS: Record<string, string> = {
 }
 
 function simpleMarkdown(md: string): string {
-  return md
-    .replace(/^### (.+)$/gm, '<h3>$1</h3>')
-    .replace(/^## (.+)$/gm, '<h2>$1</h2>')
-    .replace(/^# (.+)$/gm, '<h1>$1</h1>')
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/`([^`]+)`/g, '<code>$1</code>')
-    .replace(/\n/g, '<br/>')
+  // Process fenced code blocks first to protect their contents
+  const codeBlocks: string[] = []
+  let result = md.replace(/```[\w]*\n?([\s\S]*?)```/g, (_match, code: string) => {
+    const idx = codeBlocks.length
+    codeBlocks.push(`<pre class="bg-muted rounded p-3 overflow-x-auto my-2"><code>${code.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</code></pre>`)
+    return `\x00CODE${idx}\x00`
+  })
+
+  // Escape HTML in the non-code portions
+  result = result.replace(/&(?!amp;|lt;|gt;|quot;|#)/g, '&amp;')
+
+  // Headings
+  result = result.replace(/^#### (.+)$/gm, '<h4 class="text-sm font-semibold mt-3 mb-1">$1</h4>')
+  result = result.replace(/^### (.+)$/gm, '<h3 class="text-base font-semibold mt-4 mb-1">$1</h3>')
+  result = result.replace(/^## (.+)$/gm, '<h2 class="text-lg font-bold mt-5 mb-2 border-b border-border pb-1">$1</h2>')
+  result = result.replace(/^# (.+)$/gm, '<h1 class="text-xl font-bold mt-5 mb-3 border-b border-border pb-2">$1</h1>')
+
+  // Horizontal rule
+  result = result.replace(/^---+$/gm, '<hr class="border-border my-4" />')
+
+  // Block quotes
+  result = result.replace(/^> (.+)$/gm, '<blockquote class="border-l-4 border-muted-foreground/30 pl-3 italic text-muted-foreground my-2">$1</blockquote>')
+
+  // Images (before links)
+  result = result.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" class="max-w-full rounded my-2" />')
+
+  // Links
+  result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer" class="text-primary underline underline-offset-2 hover:opacity-80">$1</a>')
+
+  // Bold and italic
+  result = result.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>')
+  result = result.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+  result = result.replace(/__(.+?)__/g, '<strong>$1</strong>')
+  result = result.replace(/\*([^*\n]+?)\*/g, '<em>$1</em>')
+  result = result.replace(/_([^_\n]+?)_/g, '<em>$1</em>')
+
+  // Inline code
+  result = result.replace(/`([^`]+)`/g, '<code class="bg-muted rounded px-1 text-[0.85em]">$1</code>')
+
+  // Unordered lists — collect consecutive lines
+  result = result.replace(/^[ \t]*[-*+] (.+)$/gm, '<li class="ml-4 list-disc">$1</li>')
+  result = result.replace(/(<li[^>]*>.*<\/li>\n?)+/g, (m) => `<ul class="my-2 space-y-0.5">${m}</ul>`)
+
+  // Ordered lists
+  result = result.replace(/^[ \t]*\d+\. (.+)$/gm, '<li class="ml-4 list-decimal">$1</li>')
+
+  // Paragraphs — lines not already wrapped in HTML tags
+  result = result.replace(/^(?!<[a-z]|[ \t]*$|\x00CODE)(.+)$/gm, '<p class="my-1 leading-relaxed">$1</p>')
+
+  // Restore code blocks
+  result = result.replace(/\x00CODE(\d+)\x00/g, (_m, i: string) => codeBlocks[parseInt(i)])
+
+  return result
 }
 
 function timeAgo(dateStr: string | null): string {
@@ -86,14 +132,25 @@ function buildTree(items: Array<{path: string; type: string; size?: number}>): T
   return sortNodes(root)
 }
 
-function TreeItem({ node, depth = 0 }: { node: TreeNode; depth?: number }) {
+function TreeItem({
+  node, depth = 0, onFileClick,
+}: {
+  node: TreeNode; depth?: number; onFileClick?: (path: string) => void
+}) {
   const [open, setOpen] = useState(depth < 1)
   const isDir = node.type === 'tree'
   return (
     <div>
       <button
-        onClick={() => isDir && setOpen(v => !v)}
-        className={`w-full flex items-center gap-2 px-2 py-1 rounded text-left text-xs transition-colors ${isDir ? 'hover:bg-muted/40 cursor-pointer' : 'cursor-default text-muted-foreground'}`}
+        onClick={() => {
+          if (isDir) setOpen(v => !v)
+          else onFileClick?.(node.path)
+        }}
+        className={`w-full flex items-center gap-2 px-2 py-1 rounded text-left text-xs transition-colors ${
+          isDir
+            ? 'hover:bg-muted/40 cursor-pointer'
+            : 'hover:bg-muted/30 cursor-pointer text-muted-foreground'
+        }`}
         style={{ paddingLeft: `${8 + depth * 16}px` }}
       >
         {isDir ? (
@@ -112,7 +169,7 @@ function TreeItem({ node, depth = 0 }: { node: TreeNode; depth?: number }) {
       {isDir && open && node.children && (
         <div>
           {node.children.map(child => (
-            <TreeItem key={child.path} node={child} depth={depth + 1} />
+            <TreeItem key={child.path} node={child} depth={depth + 1} onFileClick={onFileClick} />
           ))}
         </div>
       )}
@@ -130,6 +187,7 @@ function RepoPanel({ repo, onClose, onDeploy }: RepoPanelProps) {
   const [tab, setTab] = useState<'readme' | 'files'>('readme')
   const [branch, setBranch] = useState(repo.defaultBranch)
   const [branches, setBranches] = useState<GitHubBranch[]>([])
+  const [selectedFile, setSelectedFile] = useState<string | null>(null)
 
   const [owner, repoName] = repo.fullName.split('/')
 
@@ -147,6 +205,13 @@ function RepoPanel({ repo, onClose, onDeploy }: RepoPanelProps) {
     queryKey: ['repo-tree', repo.fullName, branch],
     queryFn: () => getRepoTree(owner, repoName, branch),
     enabled: tab === 'files',
+    retry: false,
+  })
+
+  const { data: fileData, isPending: filePending } = useQuery({
+    queryKey: ['repo-file', repo.fullName, branch, selectedFile],
+    queryFn: () => getFileContent(owner, repoName, selectedFile!, branch),
+    enabled: selectedFile !== null,
     retry: false,
   })
 
@@ -235,21 +300,48 @@ function RepoPanel({ repo, onClose, onDeploy }: RepoPanelProps) {
           )}
 
           {tab === 'files' && (
-            treePending ? (
-              <div className="space-y-1 animate-pulse">
-                {Array.from({ length: 8 }).map((_, i) => (
-                  <div key={i} className="h-7 rounded bg-muted" style={{ width: `${60 + (i % 3) * 15}%`, marginLeft: `${(i % 2) * 16}px` }} />
-                ))}
-              </div>
-            ) : treeNodes.length ? (
-              <div className="font-mono text-[13px]">
-                {treeNodes.map(node => <TreeItem key={node.path} node={node} />)}
+            selectedFile ? (
+              <div className="flex flex-col h-full min-h-0">
+                <div className="flex items-center gap-2 mb-3">
+                  <button
+                    onClick={() => setSelectedFile(null)}
+                    className="text-xs text-primary hover:underline"
+                  >
+                    ← Files
+                  </button>
+                  <span className="text-xs text-muted-foreground font-mono truncate">{selectedFile}</span>
+                </div>
+                {filePending ? (
+                  <div className="space-y-1 animate-pulse">
+                    {Array.from({ length: 10 }).map((_, i) => (
+                      <div key={i} className="h-4 rounded bg-muted" style={{ width: `${50 + (i % 5) * 10}%` }} />
+                    ))}
+                  </div>
+                ) : (
+                  <pre
+                    className="flex-1 overflow-auto font-mono text-[12px] leading-relaxed text-foreground bg-muted/20 rounded-lg p-3 whitespace-pre-wrap break-all"
+                  >
+                    {fileData?.content || '(empty file)'}
+                  </pre>
+                )}
               </div>
             ) : (
-              <div className="flex flex-col items-center justify-center py-16 text-muted-foreground gap-2">
-                <Folder size={28} className="opacity-30" />
-                <p className="text-xs opacity-50">Empty repository</p>
-              </div>
+              treePending ? (
+                <div className="space-y-1 animate-pulse">
+                  {Array.from({ length: 8 }).map((_, i) => (
+                    <div key={i} className="h-7 rounded bg-muted" style={{ width: `${60 + (i % 3) * 15}%`, marginLeft: `${(i % 2) * 16}px` }} />
+                  ))}
+                </div>
+              ) : treeNodes.length ? (
+                <div className="font-mono text-[13px]">
+                  {treeNodes.map(node => <TreeItem key={node.path} node={node} onFileClick={setSelectedFile} />)}
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center py-16 text-muted-foreground gap-2">
+                  <Folder size={28} className="opacity-30" />
+                  <p className="text-xs opacity-50">Empty repository</p>
+                </div>
+              )
             )
           )}
         </div>
@@ -289,6 +381,7 @@ export default function GitHub() {
   const [search, setSearch] = useState('')
   const [langFilter, setLangFilter] = useState('')
   const [visFilter, setVisFilter] = useState<'all' | 'public' | 'private'>('all')
+  const [sortBy, setSortBy] = useState<'pushed' | 'updated' | 'name'>('pushed')
   const [selectedRepo, setSelectedRepo] = useState<GitHubRepo | null>(null)
   const [watching, setWatching] = useState<{ id: number; name: string } | null>(null)
   const [wizardInitialRepo, setWizardInitialRepo] = useState<{ repo: GitHubRepo; branch: string } | null>(null)
@@ -309,18 +402,27 @@ export default function GitHub() {
     ? [...new Set(repos.map(r => r.language).filter(Boolean) as string[])].sort()
     : []
 
-  const filtered = (repos ?? []).filter(r => {
-    if (visFilter === 'public' && r.private) return false
-    if (visFilter === 'private' && !r.private) return false
-    if (langFilter && r.language !== langFilter) return false
-    if (search) {
-      const q = search.toLowerCase()
-      return r.name.toLowerCase().includes(q) ||
-        (r.description ?? '').toLowerCase().includes(q) ||
-        (r.language ?? '').toLowerCase().includes(q)
-    }
-    return true
-  })
+  const filtered = (repos ?? [])
+    .filter(r => {
+      if (visFilter === 'public' && r.private) return false
+      if (visFilter === 'private' && !r.private) return false
+      if (langFilter && r.language !== langFilter) return false
+      if (search) {
+        const q = search.toLowerCase()
+        return r.name.toLowerCase().includes(q) ||
+          (r.description ?? '').toLowerCase().includes(q) ||
+          (r.language ?? '').toLowerCase().includes(q)
+      }
+      return true
+    })
+    .sort((a, b) => {
+      if (sortBy === 'name') return a.name.localeCompare(b.name)
+      if (sortBy === 'updated') {
+        return (b.updatedAt ?? '').localeCompare(a.updatedAt ?? '')
+      }
+      // 'pushed' — most recently pushed first
+      return (b.pushedAt ?? b.updatedAt ?? '').localeCompare(a.pushedAt ?? a.updatedAt ?? '')
+    })
 
   const handlePatValidated = (user: GHUser) => {
     setGhUser(user)
@@ -456,6 +558,16 @@ export default function GitHub() {
             </button>
           ))}
         </div>
+        <select
+          value={sortBy}
+          onChange={e => setSortBy(e.target.value as 'pushed' | 'updated' | 'name')}
+          className="input-field"
+          style={{ width: 'auto', minWidth: '150px' }}
+        >
+          <option value="pushed">Recently pushed</option>
+          <option value="updated">Recently updated</option>
+          <option value="name">Name A–Z</option>
+        </select>
       </div>
 
       {/* Repo grid */}
@@ -515,8 +627,10 @@ export default function GitHub() {
                   </span>
                 </div>
 
-                {repo.updatedAt && (
-                  <p className="text-[10px] text-muted-foreground/60">Updated {timeAgo(repo.updatedAt)}</p>
+                {(repo.pushedAt ?? repo.updatedAt) && (
+                  <p className="text-[10px] text-muted-foreground/60">
+                    {repo.pushedAt ? 'Pushed' : 'Updated'} {timeAgo(repo.pushedAt ?? repo.updatedAt)}
+                  </p>
                 )}
               </button>
             )

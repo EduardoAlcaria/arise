@@ -67,6 +67,17 @@ public class GitHubController {
         return ResponseEntity.ok(gitHubService.getTree(user.getId(), owner, repo, branch));
     }
 
+    @GetMapping("/repos/{owner}/{repo}/file")
+    public ResponseEntity<Map<String, String>> getFileContent(
+            @PathVariable String owner,
+            @PathVariable String repo,
+            @RequestParam String path,
+            @RequestParam(defaultValue = "main") String branch,
+            @AuthenticationPrincipal User user) {
+        String content = gitHubService.getFileContent(user.getId(), owner, repo, path, branch);
+        return ResponseEntity.ok(Map.of("content", content));
+    }
+
     @GetMapping("/repos/{owner}/{repo}/envvars")
     public ResponseEntity<Map<String, Object>> getEnvVars(
             @PathVariable String owner,

@@ -31,3 +31,6 @@ export const setupRunner = (owner: string, repo: string, machineId: number) =>
 
 export const getWorkflowFiles = (owner: string, repo: string) =>
   client.get<string[]>(`/cicd/workflows/${owner}/${repo}`).then(r => r.data)
+
+export const getFileContent = (owner: string, repo: string, path: string, branch: string) =>
+  client.get<{ content: string }>(`/github/repos/${owner}/${repo}/file`, { params: { path, branch } }).then(r => r.data)
