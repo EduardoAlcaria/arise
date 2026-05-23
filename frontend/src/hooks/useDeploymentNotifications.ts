@@ -4,9 +4,9 @@ import { useAuthStore } from '../stores/authStore'
 
 export function useDeploymentNotifications() {
   const queryClient = useQueryClient()
+  const token = useAuthStore(state => state.token)
 
   useEffect(() => {
-    const token = useAuthStore.getState().token
     if (!token) return
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -14,6 +14,7 @@ export function useDeploymentNotifications() {
 
     let ws: WebSocket
     let reconnectTimer: ReturnType<typeof setTimeout>
+    let destroyed = false
 
     function connect() {
       ws = new WebSocket(url)
@@ -31,7 +32,9 @@ export function useDeploymentNotifications() {
       }
 
       ws.onclose = () => {
-        reconnectTimer = setTimeout(connect, 5000)
+        if (!destroyed) {
+          reconnectTimer = setTimeout(connect, 5000)
+        }
       }
 
       ws.onerror = () => {
@@ -42,8 +45,9 @@ export function useDeploymentNotifications() {
     connect()
 
     return () => {
+      destroyed = true
       clearTimeout(reconnectTimer)
       ws?.close()
     }
-  }, [queryClient])
+  }, [queryClient, token])
 }
