@@ -11,6 +11,7 @@ Arise is a self-hosted platform for managing remote servers, deploying applicati
 - **Run Docker containers on remote machines.** Pull images, set environment variables, map ports, and manage container lifecycle without touching a terminal.
 - **Deploy multi-service applications.** Define a group of repositories that compose an application, inject configuration files (`.env`, `nginx.conf`, custom configs), and have the platform orchestrate the clone-build-compose cycle on the target machine.
 - **Expose applications through Cloudflare Tunnels.** Optionally create a tunnel during deployment, configure DNS automatically, and get a public HTTPS URL without opening firewall ports.
+- **Monitor CI/CD pipelines.** View GitHub Actions workflow runs and runners across all repositories. Register self-hosted runners on remote machines directly from the UI.
 - **Remain fully self-hosted.** The entire platform runs as a set of Docker containers on any machine. No data leaves your infrastructure.
 
 ---
@@ -20,29 +21,38 @@ Arise is a self-hosted platform for managing remote servers, deploying applicati
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │  Browser                                                    │
-│  React 18 · Vite · TailwindCSS · TanStack Query            │
+│  React 19 · Vite · TailwindCSS · TanStack Query            │
 └──────────────────────────┬──────────────────────────────────┘
-                           │ HTTP / WebSocket
+                           │ HTTP / SSE / WebSocket
 ┌──────────────────────────▼──────────────────────────────────┐
-│  Backend  (Spring Boot 3.3 · Java 21)                      │
+│  Backend  (Spring Boot 3.3.5 · Java 21)                    │
 │                                                             │
-│  REST API  ──►  Spring Security (JWT)                      │
-│  WebSocket ──►  SSH Terminal relay (JSch)                  │
-│  Async tasks ─► RabbitMQ queue ──► Deployment worker       │
-│                                       │                     │
-│                                       ▼                     │
-│                              SSH to remote machine          │
-│                              (git clone · docker build)     │
+│  REST API      ──► Spring Security (JWT)                   │
+│  SSE stream    ──► Deployment log streaming                 │
+│  WS /terminal  ──► SSH terminal relay (JSch)               │
+│  WS /notify    ──► Real-time deployment completion push     │
+│                                                             │
+│  POST /api/deployments                                      │
+│      → DB save (PENDING)                                    │
+│      → afterCommit: publish to deployment.run.queue         │
+│                          │                                  │
+│  DeploymentRunListener ◄─┘                                  │
+│      → SSH to remote machine                                │
+│      → git clone · stack detect · docker build             │
+│      → publishes DEPLOYMENT_SUCCESS/FAILED event            │
+│                          │                                  │
+│  DeploymentEventListener ◄┘                                 │
+│      → WS broadcast to all browser tabs                     │
+│      → hooks.queue (post-deploy webhook foundation)         │
 └──────┬──────────────────────────────────────────────────────┘
        │
        ├── PostgreSQL 16   (persistent state)
-       ├── Redis 7         (session cache / token store)
-       └── RabbitMQ 3.13   (async deployment queue)
+       └── RabbitMQ 3.13   (deployment run queue · event queue · hooks queue)
 ```
 
-The backend is stateless between requests. Every deployment is queued into RabbitMQ so the HTTP response returns immediately and the work runs in a thread pool. Deployment logs are written to PostgreSQL in real time and streamed to the browser via SSE.
+The backend is stateless between requests. Deployments are queued into RabbitMQ so the HTTP response returns immediately. The message is only published **after the DB transaction commits** (via `TransactionSynchronizationManager.afterCommit`) — no race condition between the listener reading and the row existing. Deployment logs stream to the browser via SSE. When a deployment finishes, RabbitMQ broadcasts a WebSocket push to all connected browser tabs, invalidating their TanStack Query caches without a page refresh.
 
-Communication with remote machines is purely over SSH — no agent, no open ports on the target. The platform holds the private key in the database (encrypted at rest) and opens an SSH session for each operation.
+Communication with remote machines is purely over SSH — no agent, no open ports on the target.
 
 ---
 
@@ -52,39 +62,38 @@ Communication with remote machines is purely over SSH — no agent, no open port
 
 | Technology | Version | Why |
 |---|---|---|
-| **Spring Boot** | 3.3.5 | Battle-tested JVM framework. Auto-configuration reduces boilerplate while keeping full control over every component. |
-| **Java** | 21 | LTS release with virtual threads (Project Loom), enabling high SSH concurrency without tuning a thread pool manually. |
+| **Spring Boot** | 3.3.5 | Battle-tested JVM framework with full control over every component. |
+| **Java** | 21 | LTS release. |
 | **Spring Security + JJWT** | — | Stateless JWT auth. Each request carries a signed token; the backend verifies it without a session store. |
-| **Spring Data JPA + Hibernate** | — | Maps entities to PostgreSQL with schema auto-migration on startup (`ddl-auto: update`). Avoids a separate migration tool for a project at this stage. |
-| **Spring AMQP + RabbitMQ** | 3.13 | Deployment pipelines are slow (git clone, docker build). Queuing them decouples the HTTP layer from the execution layer and makes it easy to add workers later. |
-| **Spring WebFlux (WebClient)** | — | Used only for outbound HTTP to the GitHub API and Cloudflare API. Non-blocking, avoids spawning a thread per external call. |
-| **WebSocket (STOMP)** | — | Powers the browser-based SSH terminal. The backend relays stdin/stdout between the browser and the remote machine's SSH session. |
-| **JSch** | — | Pure-Java SSH client. Executes commands on remote machines and powers the interactive terminal channel without requiring a native SSH binary. |
-| **Docker Java** | — | Manages Docker containers on the local host (for the Containers page). Talks to the Docker daemon socket directly. |
-| **PostgreSQL** | 16 | Primary store for users, machines, deployments, and logs. Chosen over lighter alternatives because JSON column support is used to store service and config-file lists inside deployment records. |
-| **Redis** | 7.2 | Fast key-value store used for token invalidation and caching GitHub API responses to stay within rate limits. |
-| **Lombok + MapStruct** | — | Eliminate boilerplate getters/setters/constructors and DTO mapping code without reflection overhead at runtime. |
+| **Spring Data JPA + Hibernate** | — | Maps entities to PostgreSQL. Schema auto-migrated on startup (`ddl-auto: update`). |
+| **Spring AMQP + RabbitMQ** | 3.13 | Three queues: `deployment.run.queue` (execution), `deployment.queue` (events → WS broadcast), `hooks.queue` (post-deploy webhooks). |
+| **Spring WebFlux (WebClient)** | — | Non-blocking outbound HTTP to GitHub API and Cloudflare API. |
+| **WebSocket** | — | Two endpoints: `/ws/terminal/*` (SSH relay) and `/ws/notifications` (deployment completion push to all tabs). |
+| **JSch** | — | Pure-Java SSH client for remote command execution and interactive terminal. |
+| **PostgreSQL** | 16 | Primary store. JSON columns hold service and config-file lists inside deployment records. |
+| **Lombok** | — | Eliminates getter/setter/constructor boilerplate. |
 
 ### Frontend
 
 | Technology | Version | Why |
 |---|---|---|
-| **React 18** | — | Component model maps naturally to the dashboard's panel-based UI. Concurrent rendering keeps the terminal and data tables responsive simultaneously. |
-| **Vite** | — | Sub-second HMR during development, optimized production bundle. No Webpack config to maintain. |
-| **TailwindCSS** | — | Utility-first CSS eliminates naming collisions and keeps styles co-located with components. The design system uses CSS custom properties for theming so the entire palette can be swapped at one variable. |
-| **TanStack Query** | — | Server state management with automatic background refetch, deduplication, and optimistic updates. Removes the need for Redux or any global state library for API data. |
-| **Zustand** | — | Minimal global store used only for auth state (JWT token, user info). Small API, no boilerplate. |
-| **React Router v6** | — | Nested routes with a single `<Layout>` wrapper. `<ProtectedRoute>` redirects unauthenticated users without any context hacks. |
-| **Lucide React** | — | Consistent icon set with tree-shaking — only imported icons end up in the bundle. |
-| **xterm.js** | — | Full terminal emulator in the browser. Handles ANSI escape codes, resize events, and clipboard. Connected to the WebSocket relay for the SSH terminal feature. |
+| **React** | 19 | Component model maps naturally to the dashboard's panel-based UI. |
+| **Vite** | — | Sub-second HMR, optimized production bundle. |
+| **TailwindCSS** | v4 | Utility-first CSS with CSS custom properties for theming. |
+| **TanStack Query** | v5 | Server state with automatic background refetch and cache invalidation. Caches are invalidated via WebSocket push on deployment completion — no polling needed. |
+| **Zustand** | — | Minimal global store for auth state (JWT token, user info). |
+| **React Router** | v7 | Nested routes with a single `<Layout>` wrapper. |
+| **React Flow** | — | Powers the topology graph with Dagre auto-layout. |
+| **xterm.js** | — | Full terminal emulator connected to the SSH WebSocket relay. |
+| **Lucide React** | — | Tree-shaken icon set. |
 
 ### Infrastructure
 
 | Component | Why |
 |---|---|
-| **Docker Compose** | Single command brings up all five services (postgres, redis, rabbitmq, backend, frontend) with health checks and dependency ordering. |
-| **nginx** | Serves the compiled React SPA inside the frontend container and proxies `/api` requests to the backend, so the browser only talks to one origin. |
-| **Cloudflare Tunnels** | Zero-trust tunnel that creates a public HTTPS URL for a deployed application without exposing any port on the remote machine. The backend automates tunnel creation, ingress configuration, and DNS via the Cloudflare API. |
+| **Docker Compose** | Single command brings up all four services (postgres, rabbitmq, backend, frontend) with health checks and dependency ordering. |
+| **nginx** | Serves the React SPA and proxies `/api` requests to the backend — one origin for the browser. |
+| **Cloudflare Tunnels** | Zero-trust tunnel for public HTTPS URLs. Backend automates creation, ingress, and DNS. |
 
 ---
 
@@ -99,14 +108,16 @@ arise/
 │   │       ├── controller/     # REST endpoints
 │   │       ├── dto/            # Request / response shapes
 │   │       ├── entity/         # JPA entities
+│   │       ├── listener/       # RabbitMQ message listeners
 │   │       ├── repository/     # Spring Data repositories
 │   │       ├── service/        # Business logic
-│   │       └── websocket/      # SSH terminal relay
+│   │       └── websocket/      # SSH terminal + notification handlers
 │   └── Dockerfile
 ├── frontend/                   # React SPA
 │   ├── src/
 │   │   ├── api/                # Typed API functions (axios)
 │   │   ├── components/         # Shared UI components
+│   │   ├── hooks/              # Custom hooks (WS notifications, etc.)
 │   │   ├── pages/              # Route-level page components
 │   │   ├── stores/             # Zustand stores
 │   │   └── types/              # Shared TypeScript interfaces
@@ -127,9 +138,9 @@ cd arise
 docker compose up --build
 ```
 
-The frontend is available at `http://localhost:3000`. The backend API is at `http://localhost:8080/api`.
+Frontend: `http://localhost:3000` · Backend API: `http://localhost:8080/api`
 
-To override the JWT secret:
+Override the JWT secret:
 
 ```bash
 JWT_SECRET=your-base64-encoded-secret docker compose up
@@ -139,21 +150,22 @@ JWT_SECRET=your-base64-encoded-secret docker compose up
 
 ## Deployment Pipeline — How It Works
 
-1. The user selects a repository and branch in the UI and picks a target machine.
-2. A `POST /api/deployments` request is saved to PostgreSQL with status `PENDING`.
-3. The request is published to a RabbitMQ queue and the HTTP response returns immediately.
-4. A worker thread picks up the message, opens an SSH session to the target machine using the stored private key, and runs:
-   - `git clone` (or `git pull` on redeploy) into `/apps/<deployment-id>/`
+1. User selects a repo, branch, and target machine in the UI.
+2. `POST /api/deployments` saves a `PENDING` record to PostgreSQL.
+3. After the DB transaction commits, the deployment ID is published to `deployment.run.queue` via RabbitMQ.
+4. `DeploymentRunListener` picks up the message, opens an SSH session to the target machine, and runs:
+   - `git clone` into `/tmp/deploy-<id>/`
    - Stack detection (Node.js, Python, Java, Go, Docker Compose, etc.)
-   - The appropriate build command for the detected stack
+   - The appropriate build command
    - `docker compose up --build -d` for compose-based stacks
-5. Each command's stdout/stderr is written as `LogEntry` rows to PostgreSQL.
-6. The deployment status is updated to `SUCCESS` or `FAILED`.
-7. The browser polls the logs endpoint and renders output in real time.
+5. Each command's stdout/stderr is written as `LogEntry` rows to PostgreSQL and streamed live to the browser via SSE.
+6. On completion, the status is set to `SUCCESS` or `FAILED` and a message is published to `deployment.queue`.
+7. `DeploymentEventListener` consumes the event and broadcasts a `DEPLOYMENT_UPDATE` WebSocket message to all connected browser tabs, which invalidate their TanStack Query caches — the deployment list updates instantly without polling.
+8. On SUCCESS, the event is also published to `hooks.queue` (post-deploy webhook foundation).
 
 For **Application** deployments (multi-repo), the platform additionally:
 - Clones each service repository into its own subfolder
-- Writes injected config files (`.env`, `nginx.conf`, etc.) to the remote via base64-encoded SSH commands
+- Writes injected config files (`.env`, `nginx.conf`, etc.) to the remote via SSH
 - Optionally creates a Cloudflare Tunnel, configures ingress rules, and registers a CNAME DNS record
 
 ---
@@ -168,14 +180,21 @@ For **Application** deployments (multi-repo), the platform additionally:
 | `POST` | `/api/machines` | Register a machine |
 | `GET` | `/api/deployments` | Paginated deployment list |
 | `POST` | `/api/deployments` | Trigger a new deployment |
-| `GET` | `/api/deployments/{id}/logs` | Fetch deployment logs |
+| `GET` | `/api/deployments/{id}/logs/stream` | SSE log stream |
 | `POST` | `/api/deployments/{id}/rollback` | Roll back to previous version |
 | `GET` | `/api/containers` | List Docker containers on a machine |
 | `POST` | `/api/containers` | Deploy a Docker container |
-| `GET` | `/api/github/repos` | List repositories for connected token |
+| `GET` | `/api/github/repos` | List repositories (sorted by push date) |
+| `GET` | `/api/github/repos/{owner}/{repo}/readme` | Fetch README markdown |
+| `GET` | `/api/github/repos/{owner}/{repo}/tree/{branch}` | Repository file tree |
+| `GET` | `/api/github/repos/{owner}/{repo}/file` | File content by path + branch |
 | `GET` | `/api/github/me` | Check GitHub connection status |
 | `POST` | `/api/github/token` | Save a GitHub PAT |
+| `GET` | `/api/cicd/runners` | All runners across all repos |
+| `GET` | `/api/cicd/runners/{owner}/{repo}` | Runners for a specific repo |
 | `GET` | `/api/cloudflare/zones` | List Cloudflare zones |
 | `GET` | `/api/cloudflare/tunnels` | List Cloudflare tunnels |
 | `POST` | `/api/cloudflare/tunnels` | Create a Cloudflare tunnel |
-| `WS` | `/ws/ssh` | Interactive SSH terminal relay |
+| `GET` | `/api/topology` | Infrastructure graph (machines, deployments, tunnels) |
+| `WS` | `/ws/terminal/{machineId}` | Interactive SSH terminal relay |
+| `WS` | `/ws/notifications` | Real-time deployment completion push |
