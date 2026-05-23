@@ -78,7 +78,12 @@ public class DeploymentService {
         }
 
         Deployment deployment = deploymentRepository.save(builder.build());
-        executeAsync(deployment.getId());
+        rabbitTemplate.convertAndSend(
+                RabbitMQConfig.DEPLOYMENT_RUN_EXCHANGE,
+                RabbitMQConfig.DEPLOYMENT_RUN_KEY,
+                deployment.getId()
+        );
+        log.info("[RabbitMQ] Queued deployment job: {}", deployment.getId());
         return toResponse(deployment);
     }
 
