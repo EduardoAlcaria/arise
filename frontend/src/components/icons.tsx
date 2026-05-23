@@ -2,12 +2,9 @@ import { useState } from 'react'
 
 /* ── logo.dev CDN ─────────────────────────────────────────────────────── */
 
-const LOGO_TOKEN = (import.meta as any).env?.VITE_LOGO_DEV_TOKEN ?? ''
-
 function logoUrl(domain: string) {
   if (!domain) return null
-  const base = `https://img.logo.dev/${domain}?size=80&format=png`
-  return LOGO_TOKEN ? `${base}&token=${LOGO_TOKEN}` : base
+  return `https://logo.clearbit.com/${domain}`
 }
 
 function LogoImg({ domain, size, fallback }: { domain: string; size: number; fallback: React.ReactNode }) {
