@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
+import { useDeploymentNotifications } from '../hooks/useDeploymentNotifications'
 import {
   LayoutDashboard, Server, Box, Rocket, GitFork, Globe,
   LogOut, ChevronLeft, ChevronRight, Menu, X, Zap, Settings, Network, Workflow, HardDrive
@@ -33,6 +34,7 @@ export default function Layout() {
   const location = useLocation()
   const [collapsed, toggleCollapsed] = useCollapsed()
   const [mobileOpen, setMobileOpen] = useState(false)
+  useDeploymentNotifications()
 
   useEffect(() => { setMobileOpen(false) }, [location.pathname])
 
