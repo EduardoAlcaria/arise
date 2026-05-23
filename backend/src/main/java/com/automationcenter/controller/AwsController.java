@@ -2,6 +2,8 @@ package com.automationcenter.controller;
 
 import com.automationcenter.dto.aws.AwsExplorerResponse;
 import com.automationcenter.entity.User;
+import com.automationcenter.exception.ResourceNotFoundException;
+import com.automationcenter.repository.AwsAccountRepository;
 import com.automationcenter.service.AwsService;
 import com.automationcenter.service.AwsTopologyService;
 import lombok.RequiredArgsConstructor;
@@ -19,6 +21,7 @@ public class AwsController {
 
     private final AwsService awsService;
     private final AwsTopologyService awsTopologyService;
+    private final AwsAccountRepository accountRepository;
 
     @GetMapping("/ec2/instances")
     public ResponseEntity<List<Map<String, Object>>> listInstances(
@@ -102,7 +105,8 @@ public class AwsController {
     public ResponseEntity<Void> evictCache(
             @PathVariable Long accountId,
             @AuthenticationPrincipal User user) {
-        awsService.listAccounts(user.getId());
+        accountRepository.findByIdAndOwnerId(accountId, user.getId())
+                .orElseThrow(() -> new ResourceNotFoundException("AWS account not found"));
         awsService.evictAccount(accountId);
         return ResponseEntity.noContent().build();
     }
