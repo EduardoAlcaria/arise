@@ -24,6 +24,15 @@ public class DataSeeder implements CommandLineRunner {
     static final String DEMO_EMAIL = "demo@automationhub.dev";
     static final String DEMO_PROFILE = "demo-profile";
 
+
+    public static String getDemoProfile() {
+        return DEMO_PROFILE;
+    }
+
+    public static String getDemoEmail() {
+        return DEMO_EMAIL;
+    }
+
     @Override
     public void run(String... args) {
         if (userRepository.existsByEmail(DEMO_EMAIL)) {
@@ -65,6 +74,19 @@ public class DataSeeder implements CommandLineRunner {
                 .owner(demo)
                 .build());
 
+        Machine edgeNode = machineRepository.save(Machine.builder()
+                .name("Edge Node (demo)")
+                .host("demo-edge.alcaria.dev")
+                .port(22)
+                .sshUser("edge")
+                .privateKey(PLACEHOLDER_KEY)
+                .tunnelType(TunnelType.PROXY_COMMAND)
+                .proxyCommand("cloudflared access ssh --hostname %h")
+                .status(MachineStatus.ONLINE)
+                .lastSeen(LocalDateTime.now().minusMinutes(1))
+                .owner(demo)
+                .build());
+
         // ── Deployments ───────────────────────────────────────────────────────
 
         deploymentRepository.save(Deployment.builder()
@@ -78,6 +100,8 @@ public class DataSeeder implements CommandLineRunner {
                 .tunnelName("demo-react-tunnel")
                 .tunnelHostname("dashboard.demo.alcaria.dev")
                 .tunnelAppPort(3000)
+                .cloudfareTunnelId("aaa00001-demo-0000-0000-react-000000000001")
+                .cloudfareTunnelUrl("https://aaa00001-demo-0000-0000-react-000000000001.cfargotunnel.com")
                 .machine(macPro)
                 .owner(demo)
                 .startedAt(LocalDateTime.now().minusDays(3))
@@ -105,6 +129,8 @@ public class DataSeeder implements CommandLineRunner {
                 .tunnelName("demo-api-tunnel")
                 .tunnelHostname("api.demo.alcaria.dev")
                 .tunnelAppPort(8080)
+                .cloudfareTunnelId("bbb00002-demo-0000-0000-api-0000000000002")
+                .cloudfareTunnelUrl("https://bbb00002-demo-0000-0000-api-0000000000002.cfargotunnel.com")
                 .machine(macPro)
                 .owner(demo)
                 .startedAt(LocalDateTime.now().minusDays(1))
@@ -127,6 +153,7 @@ public class DataSeeder implements CommandLineRunner {
                 .detectedStack("Python")
                 .machine(linuxBox)
                 .owner(demo)
+                // intentionally no tunnel — tests "failed deploy, no tunnel" path
                 .startedAt(LocalDateTime.now().minusHours(5))
                 .finishedAt(LocalDateTime.now().minusHours(5).plusMinutes(1))
                 .logs("""
@@ -155,6 +182,34 @@ public class DataSeeder implements CommandLineRunner {
                         """)
                 .build());
 
+        deploymentRepository.save(Deployment.builder()
+                .name("spring-worker")
+                .type(DeploymentType.REPOSITORY)
+                .status(DeploymentStatus.SUCCESS)
+                .repositoryUrl("https://github.com/demo/spring-worker.git")
+                .branch("main")
+                .detectedStack("Java / Maven")
+                .resolvedCommitSha("c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4")
+                .tunnelName("demo-worker-tunnel")
+                .tunnelHostname("worker.demo.alcaria.dev")
+                .tunnelAppPort(8081)
+                .cloudfareTunnelId("ccc00003-demo-0000-0000-worker-000000003")
+                .cloudfareTunnelUrl("https://ccc00003-demo-0000-0000-worker-000000003.cfargotunnel.com")
+                .machine(edgeNode)
+                .owner(demo)
+                .startedAt(LocalDateTime.now().minusDays(2))
+                .finishedAt(LocalDateTime.now().minusDays(2).plusMinutes(6))
+                .logs("""
+                        [INFO] Cloning repository…
+                        [INFO] Detected stack: Java / Maven (pom.xml found)
+                        [INFO] Running: mvn package -DskipTests
+                        [INFO] BUILD SUCCESS
+                        [INFO] Starting service on port 8081
+                        [INFO] Creating Cloudflare tunnel: demo-worker-tunnel
+                        [INFO] ✓ Deployment successful. Tunnel: https://worker.demo.alcaria.dev
+                        """)
+                .build());
+
         // ── SixEyes demo deployments ──────────────────────────────────────────
 
         deploymentRepository.save(Deployment.builder()
@@ -168,6 +223,8 @@ public class DataSeeder implements CommandLineRunner {
                 .tunnelName("demo-sixeyes-tunnel")
                 .tunnelHostname("sixeyes.demo.alcaria.dev")
                 .tunnelAppPort(4000)
+                .cloudfareTunnelId("ddd00004-demo-0000-0000-sixeyes-000004")
+                .cloudfareTunnelUrl("https://ddd00004-demo-0000-0000-sixeyes-000004.cfargotunnel.com")
                 .machine(macPro)
                 .owner(demo)
                 .startedAt(LocalDateTime.now().minusDays(2))
