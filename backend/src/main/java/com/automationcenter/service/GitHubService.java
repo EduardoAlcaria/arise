@@ -110,11 +110,18 @@ public class GitHubService {
     public String getReadme(Long userId, String owner, String repo) {
         User user = getUser(userId);
         try {
-            GitHub github = new GitHubBuilder().withOAuthToken(user.getGithubToken()).build();
-            GHRepository ghRepo = github.getRepository(owner + "/" + repo);
-            var readme = ghRepo.getReadme();
-            if (readme == null) return "";
-            String b64 = readme.getContent().replaceAll("\\s", "");
+            @SuppressWarnings("unchecked")
+            Map<String, Object> response = webClientBuilder.build()
+                    .get()
+                    .uri("https://api.github.com/repos/{owner}/{repo}/readme", owner, repo)
+                    .header("Authorization", "token " + user.getGithubToken())
+                    .header("Accept", "application/vnd.github+json")
+                    .retrieve()
+                    .bodyToMono(Map.class)
+                    .block();
+
+            if (response == null) return "";
+            String b64 = ((String) response.get("content")).replaceAll("\\s", "");
             return new String(Base64.getDecoder().decode(b64), StandardCharsets.UTF_8);
         } catch (Exception e) {
             log.warn("Could not fetch README for {}/{}: {}", owner, repo, e.getMessage());
