@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { getDeployments, createDeployment, rollbackDeployment, redeployDeployment, getDeploymentLogs, addDeploymentTunnel, deleteDeployment, removeDeploymentTunnel } from '../api/deployments'
+import { getDeployments, createDeployment, rollbackDeployment, redeployDeployment, addDeploymentTunnel, deleteDeployment, removeDeploymentTunnel } from '../api/deployments'
 import type { Deployment } from '../types'
 import { getMachines } from '../api/machines'
 import { getGitHubUser, type GHUser } from '../api/github'
@@ -85,7 +85,6 @@ interface TunnelModalState {
 export default function Deployments() {
   const qc = useQueryClient()
   const [showWizard, setShowWizard] = useState(false)
-  const [logsModal, setLogsModal] = useState<{ id: number; name: string } | null>(null)
   const [search, setSearch] = useState('')
   const [isDeploying, setIsDeploying] = useState(false)
   const [ghUser, setGhUser] = useState<GHUser | null>(null)
@@ -109,12 +108,6 @@ export default function Deployments() {
     queryFn: () => getDeployments(0, 200),
   })
   const { data: machines } = useQuery({ queryKey: ['machines'], queryFn: getMachines })
-  const { data: logs } = useQuery({
-    queryKey: ['deployment-logs', logsModal?.id],
-    queryFn: () => getDeploymentLogs(logsModal!.id),
-    enabled: !!logsModal,
-  })
-
   const rollbackMut = useMutation({
     mutationFn: rollbackDeployment,
     onSuccess: () => qc.invalidateQueries({ queryKey: ['deployments-all'] }),
@@ -377,23 +370,13 @@ export default function Deployments() {
                             <p className="text-[10px] text-muted-foreground/60">{timeAgo(run.createdAt)}</p>
                           </div>
                           <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-                            {['BUILDING', 'DEPLOYING', 'PENDING'].includes(run.status) ? (
-                              <button
-                                onClick={() => setWatching({ id: run.id, name: run.name })}
-                                title="Watch live"
-                                className="p-1.5 rounded hover:bg-muted text-primary transition-colors"
-                              >
-                                <Radio size={13} />
-                              </button>
-                            ) : (
-                              <button
-                                onClick={() => setLogsModal({ id: run.id, name: run.name })}
-                                title="View logs"
-                                className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-                              >
-                                <FileText size={13} />
-                              </button>
-                            )}
+                            <button
+                              onClick={() => setWatching({ id: run.id, name: run.name })}
+                              title={['BUILDING', 'DEPLOYING', 'PENDING'].includes(run.status) ? 'Watch live' : 'View logs'}
+                              className={`p-1.5 rounded hover:bg-muted transition-colors ${['BUILDING', 'DEPLOYING', 'PENDING'].includes(run.status) ? 'text-primary' : 'text-muted-foreground hover:text-foreground'}`}
+                            >
+                              {['BUILDING', 'DEPLOYING', 'PENDING'].includes(run.status) ? <Radio size={13} /> : <FileText size={13} />}
+                            </button>
                             {run.status === 'SUCCESS' && !run.cloudfareTunnelUrl && (
                               <button
                                 onClick={e => openTunnelModal(run, e)}
@@ -593,22 +576,6 @@ export default function Deployments() {
         </div>
       )}
 
-      {logsModal && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
-          <div className="bg-card border border-border rounded-2xl p-6 w-full max-w-2xl shadow-2xl animate-fade-up">
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h3 className="font-semibold text-foreground">Deployment Logs</h3>
-                <p className="text-xs text-muted-foreground mt-0.5">{logsModal.name}</p>
-              </div>
-              <button onClick={() => setLogsModal(null)} className="text-muted-foreground hover:text-foreground"><X size={18} /></button>
-            </div>
-            <div className="terminal max-h-80">
-              {logs?.map(l => `[${l.level}] ${l.message}`).join('\n') ?? 'Loading…'}
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }
