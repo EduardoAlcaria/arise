@@ -9,7 +9,10 @@ import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.serializer.GenericJackson2JsonRedisSerializer;
 import org.springframework.data.redis.serializer.RedisSerializationContext;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 import java.time.Duration;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -18,10 +21,10 @@ import java.util.Map;
 public class RedisConfig {
 
     @Bean
-    public RedisCacheManager cacheManager(RedisConnectionFactory factory) {
+    public RedisCacheManager cacheManager(RedisConnectionFactory factory, ObjectMapper objectMapper) {
         RedisCacheConfiguration base = RedisCacheConfiguration.defaultCacheConfig()
                 .serializeValuesWith(RedisSerializationContext.SerializationPair.fromSerializer(
-                        new GenericJackson2JsonRedisSerializer()));
+                        new GenericJackson2JsonRedisSerializer(objectMapper)));
 
         Map<String, RedisCacheConfiguration> configs = new HashMap<>();
         configs.put("aws-ec2",          base.entryTtl(Duration.ofMinutes(2)));
@@ -33,7 +36,7 @@ public class RedisConfig {
         configs.put("aws-traces",       base.entryTtl(Duration.ofMinutes(1)));
 
         return RedisCacheManager.builder(factory)
-                .withInitialCacheConfigurations(configs)
+                .withInitialCacheConfigurations(Collections.unmodifiableMap(configs))
                 .build();
     }
 }
