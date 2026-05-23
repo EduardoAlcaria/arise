@@ -6,6 +6,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.stereotype.Component;
 
 import java.nio.charset.StandardCharsets;
@@ -16,6 +17,7 @@ import java.nio.charset.StandardCharsets;
 public class DeploymentEventListener {
 
     private final NotificationHandler notificationHandler;
+    private final RabbitTemplate rabbitTemplate;
 
     @RabbitListener(queues = RabbitMQConfig.DEPLOYMENT_QUEUE)
     public void onDeploymentEvent(Message message) {
@@ -36,6 +38,14 @@ public class DeploymentEventListener {
                     deploymentId, status
             );
             notificationHandler.broadcast(json);
+            if ("SUCCESS".equals(status)) {
+                rabbitTemplate.convertAndSend(
+                        RabbitMQConfig.HOOKS_EXCHANGE,
+                        RabbitMQConfig.HOOKS_KEY,
+                        deploymentId
+                );
+                log.info("[RabbitMQ] Published post-deploy hook event for deployment {}", deploymentId);
+            }
         } catch (Exception e) {
             log.error("[RabbitMQ] Failed to handle deployment event {}: {}", event, e.getMessage(), e);
         }

@@ -18,6 +18,10 @@ public class RabbitMQConfig {
     public static final String DEPLOYMENT_RUN_EXCHANGE = "deployment.run.exchange";
     public static final String DEPLOYMENT_RUN_KEY      = "deployment.run";
 
+    public static final String HOOKS_QUEUE    = "hooks.queue";
+    public static final String HOOKS_EXCHANGE = "hooks.exchange";
+    public static final String HOOKS_KEY      = "hooks.events";
+
     @Bean
     public Queue deploymentQueue() {
         return new Queue(DEPLOYMENT_QUEUE, true);
@@ -46,6 +50,21 @@ public class RabbitMQConfig {
     @Bean
     public Binding deploymentRunBinding(Queue deploymentRunQueue, DirectExchange deploymentRunExchange) {
         return BindingBuilder.bind(deploymentRunQueue).to(deploymentRunExchange).with(DEPLOYMENT_RUN_KEY);
+    }
+
+    @Bean
+    public Queue hooksQueue() {
+        return new Queue(HOOKS_QUEUE, true);
+    }
+
+    @Bean
+    public DirectExchange hooksExchange() {
+        return new DirectExchange(HOOKS_EXCHANGE);
+    }
+
+    @Bean
+    public Binding hooksBinding(Queue hooksQueue, DirectExchange hooksExchange) {
+        return BindingBuilder.bind(hooksQueue).to(hooksExchange).with(HOOKS_KEY);
     }
 
     @Bean
