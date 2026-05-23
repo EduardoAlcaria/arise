@@ -51,7 +51,8 @@ public class TopologyService {
             if (d.getRepositoryUrl() != null) meta.put("repositoryUrl", d.getRepositoryUrl());
             if (d.getBranch() != null) meta.put("branch", d.getBranch());
             if (d.getDetectedStack() != null) meta.put("stack", d.getDetectedStack());
-            if (d.getCloudfareTunnelUrl() != null) meta.put("tunnelUrl", d.getCloudfareTunnelUrl());
+            if (d.getTunnelHostname() != null) meta.put("hostname", "https://" + d.getTunnelHostname());
+            else if (d.getCloudfareTunnelUrl() != null) meta.put("tunnelUrl", d.getCloudfareTunnelUrl());
 
             nodes.add(new TopologyNode(
                 "deploy-" + d.getId(),
@@ -65,12 +66,16 @@ public class TopologyService {
                 edges.add(new TopologyEdge("deploy-" + d.getId(), "machine-" + d.getMachine().getId(), "deployed on"));
             }
 
-            // Tunnel node
-            if (d.getCloudfareTunnelUrl() != null) {
+            // Tunnel node — created whenever hostname OR tunnel URL is available
+            String tunnelHost = d.getTunnelHostname();
+            String tunnelUrl  = d.getCloudfareTunnelUrl();
+            if (tunnelHost != null || tunnelUrl != null) {
                 String tunnelId = "tunnel-dep-" + d.getId();
-                String label = d.getTunnelHostname() != null ? d.getTunnelHostname() : d.getCloudfareTunnelUrl();
-                nodes.add(new TopologyNode(tunnelId, "tunnel", label, "ACTIVE",
-                    Map.of("url", d.getCloudfareTunnelUrl())));
+                String label    = tunnelHost != null ? tunnelHost : tunnelUrl;
+                Map<String, Object> tunnelMeta = new HashMap<>();
+                tunnelMeta.put("url", tunnelHost != null ? "https://" + tunnelHost : tunnelUrl);
+                if (d.getTunnelAppPort() != null) tunnelMeta.put("port", d.getTunnelAppPort());
+                nodes.add(new TopologyNode(tunnelId, "tunnel", label, "ACTIVE", tunnelMeta));
                 edges.add(new TopologyEdge(tunnelId, "deploy-" + d.getId(), "exposes"));
             }
         }
