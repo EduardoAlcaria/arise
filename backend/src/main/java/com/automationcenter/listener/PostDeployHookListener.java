@@ -15,8 +15,7 @@ public class PostDeployHookListener {
     @RabbitListener(queues = RabbitMQConfig.HOOKS_QUEUE)
     public void onPostDeployHook(Message message) {
         try {
-            String deploymentId = new String(message.getBody(), StandardCharsets.UTF_8)
-                    .replace("\"", "");
+            String deploymentId = new String(message.getBody(), StandardCharsets.UTF_8);
             log.info("[PostDeployHook] Deployment {} completed successfully. " +
                     "Webhook invocation placeholder — no webhook URL configured.", deploymentId);
         } catch (Exception e) {
