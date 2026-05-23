@@ -334,7 +334,9 @@ public class CicdService {
                             byId.put(n.longValue(), enriched);
                         }
                     }
-                } catch (Exception ignored) {}
+                } catch (Exception e) {
+                    log.warn("Could not list runners for {}: {}", ghRepo.get("full_name"), e.getMessage());
+                }
             });
 
             return new java.util.ArrayList<>(byId.values());

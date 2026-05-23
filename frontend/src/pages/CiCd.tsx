@@ -489,8 +489,12 @@ export default function CiCd() {
   })
 
   const deleteRunnerMut = useMutation({
-    mutationFn: (runnerId: number) => deleteRunner(owner, repo, runnerId),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['cicd-runners'] }),
+    mutationFn: ({ runnerId, rOwner, rRepo }: { runnerId: number; rOwner: string; rRepo: string }) =>
+      deleteRunner(rOwner, rRepo, runnerId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['cicd-runners'] })
+      qc.invalidateQueries({ queryKey: ['cicd-runners-all'] })
+    },
   })
 
   const TABS: { id: Tab; label: string; icon: typeof Workflow }[] = [
@@ -668,7 +672,7 @@ export default function CiCd() {
                 <RunnerRow
                   key={runner.id}
                   runner={runner}
-                  onDelete={id => deleteRunnerMut.mutate(id)}
+                  onDelete={(id, rOwner, rRepo) => deleteRunnerMut.mutate({ runnerId: id, rOwner, rRepo })}
                 />
               ))}
             </div>
@@ -697,7 +701,7 @@ export default function CiCd() {
 
 // ── Runner row ────────────────────────────────────────────────────────────────
 
-function RunnerRow({ runner, onDelete }: { runner: Runner; onDelete: (id: number) => void }) {
+function RunnerRow({ runner, onDelete }: { runner: Runner; onDelete: (id: number, owner: string, repo: string) => void }) {
   const online = runner.status === 'online'
   return (
     <div className="flex items-center gap-3 px-4 py-3 border border-border rounded-lg group">
@@ -722,7 +726,10 @@ function RunnerRow({ runner, onDelete }: { runner: Runner; onDelete: (id: number
         {runner.status}
       </span>
       <button
-        onClick={() => onDelete(runner.id)}
+        onClick={() => {
+          const [rOwner, rRepo] = runner.repo?.split('/') ?? ['', '']
+          onDelete(runner.id, rOwner, rRepo)
+        }}
         className="p-1.5 rounded-md text-muted-foreground hover:text-destructive hover:bg-muted transition-colors opacity-0 group-hover:opacity-100"
         title="Remove runner"
       >
