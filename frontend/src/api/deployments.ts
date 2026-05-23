@@ -1,4 +1,5 @@
 import client from './client'
+import { useAuthStore } from '../stores/authStore'
 import type { Deployment, LogEntry, Page } from '../types'
 
 export interface AppServiceItem {
@@ -39,3 +40,39 @@ export const addDeploymentTunnel = (id: number, tunnelName: string, tunnelHostna
 export const deleteDeployment = (id: number) => client.delete(`/deployments/${id}`)
 export const removeDeploymentTunnel = (id: number) =>
   client.delete<Deployment>(`/deployments/${id}/tunnel`).then((r) => r.data)
+
+export function streamDeploymentLogs(
+  id: number,
+  onMessage: (line: string) => void,
+  onComplete: () => void,
+  onError: (err: Error) => void,
+): () => void {
+  const token = useAuthStore.getState().token
+  const controller = new AbortController()
+
+  fetch(`/api/deployments/${id}/logs/stream`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    signal: controller.signal,
+  })
+    .then(async (res) => {
+      if (!res.ok) { onError(new Error(`HTTP ${res.status}`)); return }
+      const reader = res.body!.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) { onComplete(); break }
+        buffer += decoder.decode(value, { stream: true })
+        const parts = buffer.split('\n')
+        buffer = parts.pop()!
+        for (const part of parts) {
+          if (part.startsWith('data: ')) onMessage(part.slice(6))
+        }
+      }
+    })
+    .catch((err) => {
+      if ((err as Error).name !== 'AbortError') onError(err as Error)
+    })
+
+  return () => controller.abort()
+}
