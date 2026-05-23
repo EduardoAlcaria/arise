@@ -14,7 +14,7 @@ import software.amazon.awssdk.services.ec2.Ec2Client;
 import software.amazon.awssdk.services.ec2.model.*;
 import software.amazon.awssdk.services.ecs.EcsClient;
 import software.amazon.awssdk.services.ecs.model.DescribeClustersRequest;
-import software.amazon.awssdk.services.lambda.LambdaClient;
+import software.amazon.awssdk.services.lambda.*;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -34,7 +34,7 @@ public class AwsTopologyService {
                 .orElseThrow(() -> new ResourceNotFoundException("AWS account not found"));
         String effectiveRegion = region != null ? region : account.getDefaultRegion();
 
-        if (DataSeeder.DEMO_PROFILE.equals(account.getProfileName()))
+        if (DataSeeder.getDemoProfile().equals(account.getProfileName()))
             return MockAwsData.topology(effectiveRegion);
 
         List<Map<String, Object>> nodes = new ArrayList<>();
@@ -50,7 +50,7 @@ public class AwsTopologyService {
             log.warn("EC2/VPC topology fetch failed: {}", e.getMessage());
         }
 
-        // Lambda
+     
         try (LambdaClient lambda = LambdaClient.builder().credentialsProvider(creds).region(Region.of(effectiveRegion)).build()) {
             lambda.listFunctionsPaginator().functions().forEach(fn -> {
                 Map<String, Object> node = new LinkedHashMap<>();
@@ -66,7 +66,7 @@ public class AwsTopologyService {
             log.warn("Lambda topology fetch failed: {}", e.getMessage());
         }
 
-        // ECS Clusters
+        
         try (EcsClient ecs = EcsClient.builder().credentialsProvider(creds).region(Region.of(effectiveRegion)).build()) {
             List<String> clusterArns = ecs.listClusters().clusterArns();
             if (!clusterArns.isEmpty()) {
@@ -86,7 +86,7 @@ public class AwsTopologyService {
             log.warn("ECS topology fetch failed: {}", e.getMessage());
         }
 
-        // Terraform overlay
+   
         if (account.getTerraformRepoUrl() != null && !account.getTerraformRepoUrl().isBlank()) {
             try {
                 List<Map<String, Object>> tfNodes = terraformParserService.parseRepo(account.getTerraformRepoUrl());
