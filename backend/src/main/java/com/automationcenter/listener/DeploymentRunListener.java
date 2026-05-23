@@ -16,6 +16,10 @@ public class DeploymentRunListener {
     @RabbitListener(queues = "${rabbitmq.queue.deployment-run:deployment.run.queue}")
     public void onRunDeployment(Long deploymentId) {
         log.info("[RabbitMQ] Picked up deployment job: {}", deploymentId);
-        deploymentService.executeAsync(deploymentId);
+        try {
+            deploymentService.executeAsync(deploymentId);
+        } catch (Exception e) {
+            log.error("[RabbitMQ] Failed to execute deployment job {}: {}", deploymentId, e.getMessage(), e);
+        }
     }
 }

@@ -18,8 +18,10 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
-import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -39,6 +41,7 @@ public class DeploymentService {
     private final CloudflareService cloudflareService;
     private final LogBroadcaster logBroadcaster;
 
+    @Transactional
     public DeploymentResponse create(DeploymentRequest request, Long ownerId) {
         User owner = userRepository.findById(ownerId)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found"));
@@ -78,16 +81,21 @@ public class DeploymentService {
         }
 
         Deployment deployment = deploymentRepository.save(builder.build());
-        rabbitTemplate.convertAndSend(
-                RabbitMQConfig.DEPLOYMENT_RUN_EXCHANGE,
-                RabbitMQConfig.DEPLOYMENT_RUN_KEY,
-                deployment.getId()
-        );
-        log.info("[RabbitMQ] Queued deployment job: {}", deployment.getId());
+        final Long deploymentId = deployment.getId();
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                rabbitTemplate.convertAndSend(
+                        RabbitMQConfig.DEPLOYMENT_RUN_EXCHANGE,
+                        RabbitMQConfig.DEPLOYMENT_RUN_KEY,
+                        deploymentId
+                );
+                log.info("[RabbitMQ] Queued deployment job: {}", deploymentId);
+            }
+        });
         return toResponse(deployment);
     }
 
-    @Async
     public void executeAsync(Long deploymentId) {
         Deployment deployment = deploymentRepository.findById(deploymentId)
                 .orElseThrow(() -> new ResourceNotFoundException("Deployment not found: " + deploymentId));
