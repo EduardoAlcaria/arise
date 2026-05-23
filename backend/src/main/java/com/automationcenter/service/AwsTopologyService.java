@@ -33,7 +33,7 @@ public class AwsTopologyService {
     private final AwsAccountRepository accountRepository;
     private final TerraformParserService terraformParserService;
 
-    @Cacheable(value = "aws-topology", key = "#accountId + ':' + #region")
+    @Cacheable(value = "aws-topology", key = "#accountId + ':' + (#region != null ? #region : 'default')")
     public Map<String, Object> getTopology(Long userId, Long accountId, String region) {
         AwsAccount account = accountRepository.findByIdAndOwnerId(accountId, userId)
                 .orElseThrow(() -> new ResourceNotFoundException("AWS account not found"));
@@ -47,8 +47,8 @@ public class AwsTopologyService {
 
         CompletableFuture<GraphSlice> ec2Future = CompletableFuture.supplyAsync(() -> {
             try (Ec2Client ec2 = Ec2Client.builder().credentialsProvider(creds).region(Region.of(r)).build()) {
-                GraphSlice vpcSlice = collectVpcTopology(ec2, r);
-                GraphSlice ec2Slice = collectEc2Topology(ec2, r);
+                GraphSlice vpcSlice = collectVpcTopology(ec2);
+                GraphSlice ec2Slice = collectEc2Topology(ec2);
                 List<Map<String, Object>> nodes = new ArrayList<>(vpcSlice.nodes());
                 nodes.addAll(ec2Slice.nodes());
                 List<Map<String, Object>> edges = new ArrayList<>(vpcSlice.edges());
@@ -104,7 +104,7 @@ public class AwsTopologyService {
         return Map.of("nodes", nodes, "edges", edges, "region", effectiveRegion);
     }
 
-    private GraphSlice collectVpcTopology(Ec2Client ec2, String region) {
+    private GraphSlice collectVpcTopology(Ec2Client ec2) {
         List<Map<String, Object>> nodes = new ArrayList<>();
         List<Map<String, Object>> edges = new ArrayList<>();
 
@@ -147,7 +147,7 @@ public class AwsTopologyService {
         return new GraphSlice(nodes, edges);
     }
 
-    private GraphSlice collectEc2Topology(Ec2Client ec2, String region) {
+    private GraphSlice collectEc2Topology(Ec2Client ec2) {
         List<Map<String, Object>> nodes = new ArrayList<>();
         List<Map<String, Object>> edges = new ArrayList<>();
 
