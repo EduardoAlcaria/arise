@@ -136,14 +136,8 @@ function SidePanel({ node, onClose }: { node: any; onClose: () => void }) {
             }}>{String(v)}</span>
           </div>
         ))}
-        {meta.tunnelUrl && (
-          <a href={String(meta.tunnelUrl)} target="_blank" rel="noreferrer"
-            style={{ fontSize: 12, color: '#60a5fa', textDecoration: 'underline', marginTop: 4 }}>
-            Open tunnel ↗
-          </a>
-        )}
-        {meta.url && (
-          <a href={String(meta.url)} target="_blank" rel="noreferrer"
+        {(meta.tunnelUrl || meta.hostname || meta.url) && (
+          <a href={String(meta.hostname ?? meta.tunnelUrl ?? meta.url)} target="_blank" rel="noreferrer"
             style={{ fontSize: 12, color: '#60a5fa', textDecoration: 'underline', marginTop: 4 }}>
             Open ↗
           </a>
