@@ -1,5 +1,6 @@
 package com.automationcenter.controller;
 
+import com.automationcenter.dto.aws.AwsExplorerResponse;
 import com.automationcenter.entity.User;
 import com.automationcenter.service.AwsService;
 import com.automationcenter.service.AwsTopologyService;
@@ -87,6 +88,23 @@ public class AwsController {
             @RequestParam(required = false) String region,
             @AuthenticationPrincipal User user) {
         return ResponseEntity.ok(awsTopologyService.getTopology(user.getId(), accountId, region));
+    }
+
+    @GetMapping("/explorer")
+    public ResponseEntity<AwsExplorerResponse> getExplorer(
+            @PathVariable Long accountId,
+            @RequestParam(required = false) String region,
+            @AuthenticationPrincipal User user) {
+        return ResponseEntity.ok(awsService.getExplorer(user.getId(), accountId, region));
+    }
+
+    @PostMapping("/cache/evict")
+    public ResponseEntity<Void> evictCache(
+            @PathVariable Long accountId,
+            @AuthenticationPrincipal User user) {
+        awsService.listAccounts(user.getId());
+        awsService.evictAccount(accountId);
+        return ResponseEntity.noContent().build();
     }
 
     @GetMapping("/traces")

@@ -4,6 +4,7 @@ import com.automationcenter.config.DataSeeder;
 import com.automationcenter.config.MockAwsData;
 import com.automationcenter.dto.aws.AwsAccountRequest;
 import com.automationcenter.dto.aws.AwsAccountResponse;
+import com.automationcenter.dto.aws.AwsExplorerResponse;
 import com.automationcenter.entity.AwsAccount;
 import com.automationcenter.entity.User;
 import com.automationcenter.exception.ResourceNotFoundException;
@@ -43,6 +44,7 @@ import software.amazon.awssdk.services.xray.model.GetTraceSummariesRequest;
 import software.amazon.awssdk.services.xray.model.Trace;
 import org.springframework.cache.CacheManager;
 import org.springframework.cache.annotation.Cacheable;
+import software.amazon.awssdk.services.lambda.LambdaClient;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
@@ -52,6 +54,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 
 @Service
 @RequiredArgsConstructor
@@ -545,6 +548,108 @@ public class AwsService {
                 .createdAt(a.getCreatedAt())
                 .reachable(reachable)
                 .accountId(awsAccountId)
+                .build();
+    }
+
+    @org.springframework.cache.annotation.Cacheable(value = "aws-explorer", key = "#accountId + ':' + (#region != null ? #region : 'default')")
+    public AwsExplorerResponse getExplorer(Long userId, Long accountId, String region) {
+        AwsAccount account = accountRepository.findByIdAndOwnerId(accountId, userId)
+                .orElseThrow(() -> new ResourceNotFoundException("AWS account not found"));
+        String effectiveRegion = region != null ? region : account.getDefaultRegion();
+
+        if (DataSeeder.getDemoProfile().equals(account.getProfileName()))
+            return buildMockExplorer(effectiveRegion);
+
+        ProfileCredentialsProvider creds = ProfileCredentialsProvider.create(account.getProfileName());
+        final String r = effectiveRegion;
+
+        CompletableFuture<List<AwsExplorerResponse.VpcSummary>> vpcFuture = CompletableFuture.supplyAsync(() -> {
+            try (Ec2Client ec2 = Ec2Client.builder().credentialsProvider(creds).region(Region.of(r)).build()) {
+                Map<String, String> vpcNames = new java.util.HashMap<>();
+                Map<String, String> vpcCidrs = new java.util.HashMap<>();
+                Map<String, Integer> subnetCounts = new java.util.HashMap<>();
+                Map<String, Integer> ec2Counts = new java.util.HashMap<>();
+
+                ec2.describeVpcs().vpcs().forEach(vpc -> {
+                    String name = vpc.tags().stream().filter(t -> "Name".equals(t.key()))
+                            .map(Tag::value).findFirst().orElse(vpc.vpcId());
+                    vpcNames.put(vpc.vpcId(), name);
+                    vpcCidrs.put(vpc.vpcId(), vpc.cidrBlock());
+                    ec2Counts.put(vpc.vpcId(), 0);
+                    subnetCounts.put(vpc.vpcId(), 0);
+                });
+
+                ec2.describeSubnets().subnets().forEach(sub ->
+                        subnetCounts.merge(sub.vpcId(), 1, Integer::sum));
+
+                ec2.describeInstances().reservations().stream()
+                        .flatMap(res -> res.instances().stream())
+                        .filter(i -> !"terminated".equals(i.state().nameAsString()))
+                        .forEach(i -> ec2Counts.merge(i.vpcId(), 1, Integer::sum));
+
+                return vpcNames.entrySet().stream().map(e -> AwsExplorerResponse.VpcSummary.builder()
+                        .vpcId(e.getKey())
+                        .name(e.getValue())
+                        .cidr(vpcCidrs.getOrDefault(e.getKey(), ""))
+                        .ec2Count(ec2Counts.getOrDefault(e.getKey(), 0))
+                        .subnetCount(subnetCounts.getOrDefault(e.getKey(), 0))
+                        .build()).toList();
+            } catch (Exception e) {
+                log.warn("Explorer VPC fetch failed: {}", e.getMessage());
+                return List.of();
+            }
+        });
+
+        CompletableFuture<Integer> lambdaFuture = CompletableFuture.supplyAsync(() -> {
+            try (LambdaClient lambda = LambdaClient.builder().credentialsProvider(creds).region(Region.of(r)).build()) {
+                return (int) lambda.listFunctionsPaginator().functions().stream().count();
+            } catch (Exception e) {
+                log.warn("Explorer Lambda count failed: {}", e.getMessage());
+                return 0;
+            }
+        });
+
+        CompletableFuture<Integer> ecsFuture = CompletableFuture.supplyAsync(() -> {
+            try (EcsClient ecs = EcsClient.builder().credentialsProvider(creds).region(Region.of(r)).build()) {
+                return ecs.listClusters().clusterArns().size();
+            } catch (Exception e) {
+                log.warn("Explorer ECS count failed: {}", e.getMessage());
+                return 0;
+            }
+        });
+
+        CompletableFuture<Integer> s3Future = CompletableFuture.supplyAsync(() -> {
+            try (S3Client s3 = S3Client.builder().credentialsProvider(creds).build()) {
+                return s3.listBuckets().buckets().size();
+            } catch (Exception e) {
+                log.warn("Explorer S3 count failed: {}", e.getMessage());
+                return 0;
+            }
+        });
+
+        CompletableFuture.allOf(vpcFuture, lambdaFuture, ecsFuture, s3Future).join();
+
+        return AwsExplorerResponse.builder()
+                .region(effectiveRegion)
+                .vpcs(vpcFuture.getNow(List.of()))
+                .lambdaCount(lambdaFuture.getNow(0))
+                .ecsClusterCount(ecsFuture.getNow(0))
+                .s3Count(s3Future.getNow(0))
+                .build();
+    }
+
+    private AwsExplorerResponse buildMockExplorer(String region) {
+        return AwsExplorerResponse.builder()
+                .region(region)
+                .vpcs(List.of(
+                    AwsExplorerResponse.VpcSummary.builder()
+                        .vpcId("vpc-demo-prod").name("prod-vpc").cidr("10.0.0.0/16").ec2Count(6).subnetCount(3).build(),
+                    AwsExplorerResponse.VpcSummary.builder()
+                        .vpcId("vpc-demo-staging").name("staging-vpc").cidr("10.1.0.0/16").ec2Count(2).subnetCount(2).build()
+                ))
+                .lambdaCount(5)
+                .ecsClusterCount(2)
+                .s3Count(8)
                 .build();
     }
 
