@@ -419,27 +419,183 @@ function EcsTab({ accountId, region }: { accountId: number; region: string }) {
 
 // ── Topology tab ──────────────────────────────────────────────────────────────
 
-// Rank defines the visual row: 0=top (VPC), 1=middle (subnet/sg), 2=compute (ec2/lambda/ecs), 3=storage
-const SVC_RANK: Record<string, number> = {
-  vpc: 0, subnet: 1, security_group: 1, ec2: 2, lambda: 2, ecs: 2, s3: 3,
-}
-const X_GAP = 260
-const Y_GAP = 170
+const GRP_PAD  = 18
+const GRP_HEAD = 40
+const NODE_W   = 230
+const NODE_H   = 82
+const NODE_GAP = 12
+const SUB_GAP  = 16
+const FREE_GAP = 60
 
-function rankLayout(nodes: Node[]): Node[] {
-  const byRank = new Map<number, Node[]>()
-  nodes.forEach(n => {
-    const rank = SVC_RANK[(n.data as any).service as string] ?? 4
-    if (!byRank.has(rank)) byRank.set(rank, [])
-    byRank.get(rank)!.push(n)
+const GRP_ID = (id: string) => `grp::${id}`
+
+// Group node — renders a labeled container for VPCs and subnets
+function AwsGroupNode({ data, selected }: { data: any; selected?: boolean }) {
+  const color = awsSvcColor(data.service)
+  const Icon  = awsSvcIcon(data.service)
+  return (
+    <div style={{
+      width: '100%', height: '100%',
+      border: `1.5px dashed ${selected ? color : color + '55'}`,
+      borderRadius: 14,
+      background: color + '06',
+      boxSizing: 'border-box',
+      pointerEvents: 'none',
+    }}>
+      <div style={{
+        position: 'absolute', top: 11, left: 14,
+        display: 'flex', alignItems: 'center', gap: 6, pointerEvents: 'none',
+      }}>
+        <Icon size={11} style={{ color, flexShrink: 0 }} />
+        <span style={{ fontSize: 11, fontWeight: 700, color, textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+          {data.label}
+        </span>
+        {data.cidr && (
+          <span style={{ fontSize: 10, color: '#475569', fontFamily: 'monospace', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>
+            {data.cidr}
+          </span>
+        )}
+        {data.az && (
+          <span style={{ fontSize: 10, color: '#475569', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>
+            · {data.az}
+          </span>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// Groups nodes by VPC → subnet → EC2 hierarchy using edge relationships.
+// Lambda / ECS / S3 that have no VPC parent float above the groups.
+function buildGroupedLayout(
+  rawNodes: any[],
+  rawEdges: any[],
+  search: string,
+): { nodes: Node[]; edges: Edge[] } {
+  const q = search.trim().toLowerCase()
+  const childrenOf = new Map<string, string[]>()
+  rawEdges.forEach(e => {
+    if (!childrenOf.has(e.source)) childrenOf.set(e.source, [])
+    childrenOf.get(e.source)!.push(e.target)
   })
-  const out: Node[] = []
-  byRank.forEach((row, rank) => {
-    row.forEach((n, i) => {
-      out.push({ ...n, position: { x: i * X_GAP - ((row.length - 1) * X_GAP) / 2, y: rank * Y_GAP } })
+  const byId = new Map<string, any>(rawNodes.map(n => [n.id, n]))
+
+  const vpcs    = rawNodes.filter(n => n.service === 'vpc')
+  const grouped = new Set(['vpc', 'subnet', 'security_group', 'ec2'])
+  const floated = rawNodes.filter(n => !grouped.has(n.service))
+
+  // Suppress containment edges — the visual nesting makes them redundant
+  const suppressed = new Set<string>()
+  rawEdges.forEach(e => {
+    const src = byId.get(e.source)?.service ?? ''
+    if (src === 'vpc' || src === 'subnet')
+      suppressed.add(e.id ?? `${e.source}->${e.target}`)
+  })
+
+  const rfEdges: Edge[] = rawEdges
+    .filter(e => !suppressed.has(e.id ?? `${e.source}->${e.target}`))
+    .map((e, i) => ({
+      id: `e-${i}`, source: e.source, target: e.target,
+      type: 'smoothstep', label: e.label,
+      labelStyle: { fontSize: 9, fill: '#64748b' },
+      labelBgStyle: { fill: '#1c1c1e', fillOpacity: 0.9 },
+      labelBgPadding: [3, 2] as [number, number],
+      labelBgBorderRadius: 3,
+      markerEnd: { type: MarkerType.ArrowClosed, color: '#475569' },
+      style: { stroke: '#475569', strokeWidth: 1.5 },
+    }))
+
+  const rfNodes: Node[] = []
+  let cursorY = 0
+
+  // ── Floated nodes (Lambda, ECS, S3 …) ────────────────────────────────────
+  floated.forEach((n, i) => {
+    const dimmed = q ? !n.label?.toLowerCase().includes(q) && !n.service?.toLowerCase().includes(q) : false
+    rfNodes.push({
+      id: n.id, type: 'awsNode',
+      position: { x: i * (NODE_W + NODE_GAP), y: 0 },
+      data: { ...n, dimmed },
     })
   })
-  return out
+  if (floated.length > 0) cursorY = NODE_H + FREE_GAP
+
+  // ── VPC groups ────────────────────────────────────────────────────────────
+  vpcs.forEach(vpc => {
+    const subIds = (childrenOf.get(vpc.id) ?? []).filter(id => byId.get(id)?.service === 'subnet')
+    const sgIds  = (childrenOf.get(vpc.id) ?? []).filter(id => byId.get(id)?.service === 'security_group')
+
+    // Compute per-subnet dimensions
+    type SubLayout = { id: string; x: number; w: number; h: number }
+    const subs: SubLayout[] = []
+    let sx = GRP_PAD
+
+    subIds.forEach(subId => {
+      const ec2Ids = (childrenOf.get(subId) ?? []).filter(id => byId.get(id)?.service === 'ec2')
+      const n = ec2Ids.length
+      const subW = NODE_W + GRP_PAD * 2
+      const subH = GRP_HEAD + (n > 0 ? n * NODE_H + (n - 1) * NODE_GAP : NODE_H) + GRP_PAD
+      subs.push({ id: subId, x: sx, w: subW, h: subH })
+      sx += subW + SUB_GAP
+    })
+
+    const sgColX  = sx + (subs.length > 0 ? GRP_PAD : 0)
+    const maxSubH = subs.reduce((m, s) => Math.max(m, s.h), 0)
+    const sgColH  = sgIds.length > 0 ? sgIds.length * NODE_H + (sgIds.length - 1) * NODE_GAP : 0
+    const innerH  = Math.max(maxSubH, sgColH) || (NODE_H + GRP_PAD)
+
+    const hasSgs = sgIds.length > 0
+    const vpcW   = sgColX + (hasSgs ? NODE_W + GRP_PAD : 0) + GRP_PAD
+    const vpcH   = GRP_HEAD + innerH + GRP_PAD * 2
+
+    // VPC group node (must appear before children in array)
+    rfNodes.push({
+      id: GRP_ID(vpc.id), type: 'awsGroup',
+      position: { x: 0, y: cursorY },
+      style: { width: vpcW, height: vpcH },
+      data: { ...vpc },
+    })
+
+    // Subnet groups inside VPC
+    subs.forEach(({ id: subId, x, w, h }) => {
+      const subnet = byId.get(subId)!
+      const ec2Ids = (childrenOf.get(subId) ?? []).filter(id => byId.get(id)?.service === 'ec2')
+
+      rfNodes.push({
+        id: GRP_ID(subId), type: 'awsGroup',
+        parentId: GRP_ID(vpc.id),
+        position: { x, y: GRP_HEAD + GRP_PAD },
+        style: { width: w, height: h },
+        data: { ...subnet },
+      })
+
+      ec2Ids.forEach((ec2Id, i) => {
+        const ec2 = byId.get(ec2Id)!
+        const dimmed = q ? !ec2.label?.toLowerCase().includes(q) : false
+        rfNodes.push({
+          id: ec2.id, type: 'awsNode',
+          parentId: GRP_ID(subId),
+          position: { x: GRP_PAD, y: GRP_HEAD + i * (NODE_H + NODE_GAP) },
+          data: { ...ec2, dimmed },
+        })
+      })
+    })
+
+    // Security groups inside VPC
+    sgIds.forEach((sgId, i) => {
+      const sg = byId.get(sgId)!
+      const dimmed = q ? !sg.label?.toLowerCase().includes(q) : false
+      rfNodes.push({
+        id: sg.id, type: 'awsNode',
+        parentId: GRP_ID(vpc.id),
+        position: { x: sgColX, y: GRP_HEAD + GRP_PAD + i * (NODE_H + NODE_GAP) },
+        data: { ...sg, dimmed },
+      })
+    })
+
+    cursorY += vpcH + FREE_GAP
+  })
+
+  return { nodes: rfNodes, edges: rfEdges }
 }
 
 function awsSvcColor(svc: string): string {
@@ -483,6 +639,8 @@ function AwsNodeCard({ data, selected }: { data: any; selected?: boolean }) {
         border: `1.5px solid ${selected ? color : isTf ? color + '55' : color + '28'}`,
         borderRadius: 10, padding: '9px 13px', width: 230,
         boxShadow: selected ? `0 0 0 2px ${color}33, 0 4px 20px ${color}22` : '0 2px 8px rgba(0,0,0,0.5)',
+        opacity: data.dimmed ? 0.2 : 1,
+        transition: 'opacity 0.2s',
       }}>
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 7 }}>
           <Icon size={13} style={{ color, flexShrink: 0, marginTop: 2 }} />
@@ -515,7 +673,7 @@ function AwsNodeCard({ data, selected }: { data: any; selected?: boolean }) {
   )
 }
 
-const awsNodeTypes = { awsNode: AwsNodeCard }
+const awsNodeTypes = { awsNode: AwsNodeCard, awsGroup: AwsGroupNode }
 
 function TopologyTab({ accountId, region }: { accountId: number; region: string }) {
   const { data: topo, isLoading, error, refetch } = useQuery({
@@ -539,31 +697,10 @@ function TopologyTab({ accountId, region }: { accountId: number; region: string 
 
   useEffect(() => {
     if (!topo?.nodes) return
-    const q = search.trim().toLowerCase()
-    const filtered = topo.nodes
-      .filter(n => !hiddenSvcs.has(n.service))
-      .filter(n => !q || n.label.toLowerCase().includes(q) || n.service.toLowerCase().includes(q))
-    const visibleIds = new Set(filtered.map(n => n.id))
-
-    const layoutNodes: Node[] = filtered.map(n => ({
-      id: n.id, type: 'awsNode', position: { x: 0, y: 0 }, data: { ...n },
-    }))
-
-    const layoutEdges: Edge[] = topo.edges
-      .filter(e => visibleIds.has(e.source) && visibleIds.has(e.target))
-      .map((e, i) => ({
-        id: `e-${i}`, source: e.source, target: e.target, type: 'smoothstep',
-        label: e.label,
-        labelStyle: { fontSize: 9, fill: '#64748b' },
-        labelBgStyle: { fill: '#1c1c1e', fillOpacity: 0.9 },
-        labelBgPadding: [3, 2] as [number, number],
-        labelBgBorderRadius: 3,
-        markerEnd: { type: MarkerType.ArrowClosed, color: '#334155' },
-        style: { stroke: '#334155', strokeWidth: 1.5 },
-      }))
-
-    setRfNodes(rankLayout(layoutNodes))
-    setRfEdges(layoutEdges)
+    const filtered = topo.nodes.filter(n => !hiddenSvcs.has(n.service))
+    const { nodes, edges } = buildGroupedLayout(filtered, topo.edges, search)
+    setRfNodes(nodes)
+    setRfEdges(edges)
   }, [topo, search, hiddenSvcs])
 
   if (isLoading) return <div className="flex items-center gap-2 text-sm text-muted-foreground py-12 justify-center"><Loader2 size={16} className="animate-spin" />Building topology…</div>
