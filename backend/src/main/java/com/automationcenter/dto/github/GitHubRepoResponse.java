@@ -15,4 +15,5 @@ public class GitHubRepoResponse {
     private String language;
     private int stargazersCount;
     private String updatedAt;
+    private String pushedAt;
 }
