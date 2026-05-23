@@ -302,6 +302,48 @@ public class CicdService {
         }).toList();
     }
 
+    @SuppressWarnings("unchecked")
+    public List<Map<String, Object>> listAllRunners(Long userId) {
+        User user = getUser(userId);
+        try {
+            List<Map<String, Object>> repoList = webClientBuilder.build()
+                    .get()
+                    .uri("https://api.github.com/user/repos?per_page=100&type=owner")
+                    .header("Authorization", "token " + user.getGithubToken())
+                    .header("Accept", "application/vnd.github+json")
+                    .retrieve()
+                    .bodyToFlux(Map.class)
+                    .collectList()
+                    .block();
+
+            if (repoList == null || repoList.isEmpty()) return List.of();
+
+            Map<Long, Map<String, Object>> byId = new java.util.concurrent.ConcurrentHashMap<>();
+            repoList.parallelStream().forEach(ghRepo -> {
+                try {
+                    String fullName = (String) ghRepo.get("full_name");
+                    if (fullName == null) return;
+                    String[] parts = fullName.split("/");
+                    if (parts.length != 2) return;
+                    List<Map<String, Object>> runners = listRunners(userId, parts[0], parts[1]);
+                    for (Map<String, Object> r : runners) {
+                        Object id = r.get("id");
+                        if (id instanceof Number n) {
+                            Map<String, Object> enriched = new java.util.HashMap<>(r);
+                            enriched.put("repo", fullName);
+                            byId.put(n.longValue(), enriched);
+                        }
+                    }
+                } catch (Exception ignored) {}
+            });
+
+            return new java.util.ArrayList<>(byId.values());
+        } catch (Exception e) {
+            log.warn("Could not list all runners: {}", e.getMessage());
+            return List.of();
+        }
+    }
+
     public void deleteRunner(Long userId, String owner, String repo, Long runnerId) {
         User user = getUser(userId);
         webClientBuilder.build()

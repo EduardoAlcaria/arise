@@ -1,11 +1,11 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
-  getWorkflows, getWorkflowRuns, getWorkflowJobs, listRunners,
+  getWorkflows, getWorkflowRuns, getWorkflowJobs, listRunners, listAllRunners,
   rerunWorkflow, triggerWorkflow, triggerByPush, deleteRunner, setupRunner,
   type WorkflowRun, type WorkflowJob, type Runner,
 } from '../api/cicd'
-import { getDeployments } from '../api/deployments'
+import { getRepos } from '../api/github'
 import { getMachines } from '../api/machines'
 import {
   GitBranch, Play, RotateCcw, Trash2, ChevronDown, ChevronRight,
@@ -440,22 +440,14 @@ export default function CiCd() {
   const [showTrigger, setShowTrigger] = useState(false)
   const [showSetupRunner, setShowSetupRunner] = useState(false)
 
-  const { data: deploymentsPage } = useQuery({
-    queryKey: ['deployments'],
-    queryFn: () => getDeployments(0, 100),
-    staleTime: 60_000,
+  const { data: ghRepos } = useQuery({
+    queryKey: ['github-repos'],
+    queryFn: getRepos,
+    staleTime: 120_000,
   })
 
-  const repos = deploymentsPage
-    ? [...new Map(
-        deploymentsPage.content
-          .filter(d => d.repositoryUrl?.includes('github.com'))
-          .map(d => {
-            const p = extractOwnerRepo(d.repositoryUrl!)
-            return p ? [`${p.owner}/${p.repo}`, `${p.owner}/${p.repo}`] : null
-          })
-          .filter(Boolean) as [string, string][]
-      ).values()]
+  const repos = ghRepos
+    ? ghRepos.map(r => r.fullName ?? r.name).filter(Boolean)
     : []
 
   const parsed = selectedRepo ? extractOwnerRepo(`github.com/${selectedRepo}`) : null
@@ -481,6 +473,13 @@ export default function CiCd() {
     queryKey: ['cicd-runners', owner, repo],
     queryFn: () => listRunners(owner, repo),
     enabled: !!owner && !!repo && tab === 'runners',
+    staleTime: 30_000,
+  })
+
+  const { data: allRunners, isLoading: allRunnersLoading, refetch: refetchAllRunners } = useQuery({
+    queryKey: ['cicd-runners-all'],
+    queryFn: listAllRunners,
+    enabled: tab === 'runners' && !selectedRepo,
     staleTime: 30_000,
   })
 
@@ -520,17 +519,17 @@ export default function CiCd() {
         </select>
       </div>
 
-      {!selectedRepo && (
+      {!selectedRepo && tab !== 'runners' && (
         <div className="flex flex-col items-center justify-center py-20 gap-3 text-muted-foreground">
           <GitBranch size={32} className="opacity-20" />
-          <p className="text-sm opacity-50">Select a repository to view its CI/CD pipelines.</p>
+          <p className="text-sm opacity-50">Select a repository to view its pipelines.</p>
           {repos.length === 0 && (
-            <p className="text-xs opacity-40">No GitHub deployments found. Deploy a repo first.</p>
+            <p className="text-xs opacity-40">No GitHub repos found. Add your PAT in Settings → GitHub.</p>
           )}
         </div>
       )}
 
-      {selectedRepo && (
+      {(selectedRepo || tab === 'runners') && (
         <>
           {/* Tabs */}
           <div className="flex items-center gap-1 border-b border-border pb-0">
@@ -568,18 +567,20 @@ export default function CiCd() {
               {tab === 'runners' && (
                 <>
                   <button
-                    onClick={() => refetchRunners()}
+                    onClick={() => selectedRepo ? refetchRunners() : refetchAllRunners()}
                     className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
                     title="Refresh"
                   >
                     <RefreshCw size={13} />
                   </button>
-                  <button
-                    onClick={() => setShowSetupRunner(true)}
-                    className="btn-primary text-xs flex items-center gap-1.5 py-1.5 px-3"
-                  >
-                    <Server size={11} /> Set Up Runner
-                  </button>
+                  {selectedRepo && (
+                    <button
+                      onClick={() => setShowSetupRunner(true)}
+                      className="btn-primary text-xs flex items-center gap-1.5 py-1.5 px-3"
+                    >
+                      <Server size={11} /> Set Up Runner
+                    </button>
+                  )}
                 </>
               )}
             </div>
@@ -640,15 +641,21 @@ export default function CiCd() {
           {/* Runners tab */}
           {tab === 'runners' && (
             <div className="space-y-2">
-              {runnersLoading && (
+              {(selectedRepo ? runnersLoading : allRunnersLoading) && (
                 <div className="flex items-center gap-2 text-sm text-muted-foreground py-8 justify-center">
                   <Loader2 size={16} className="animate-spin" /> Loading runners…
                 </div>
               )}
-              {!runnersLoading && (!runners || runners.length === 0) && (
+              {!selectedRepo && !allRunnersLoading && (!allRunners || allRunners.length === 0) && (
                 <div className="flex flex-col items-center justify-center py-16 gap-3 text-muted-foreground">
                   <Server size={28} className="opacity-20" />
-                  <p className="text-sm opacity-50">No self-hosted runners registered.</p>
+                  <p className="text-sm opacity-50">No self-hosted runners found across any repository.</p>
+                </div>
+              )}
+              {selectedRepo && !runnersLoading && (!runners || runners.length === 0) && (
+                <div className="flex flex-col items-center justify-center py-16 gap-3 text-muted-foreground">
+                  <Server size={28} className="opacity-20" />
+                  <p className="text-sm opacity-50">No self-hosted runners registered for this repo.</p>
                   <button
                     onClick={() => setShowSetupRunner(true)}
                     className="btn-primary text-xs flex items-center gap-1.5 py-1.5 px-3"
@@ -657,7 +664,7 @@ export default function CiCd() {
                   </button>
                 </div>
               )}
-              {runners?.map(runner => (
+              {(selectedRepo ? runners : allRunners)?.map(runner => (
                 <RunnerRow
                   key={runner.id}
                   runner={runner}
@@ -707,6 +714,9 @@ function RunnerRow({ runner, onDelete }: { runner: Runner; onDelete: (id: number
             <span key={l} className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">{l}</span>
           ))}
         </div>
+        {runner.repo && (
+          <span className="text-[10px] text-muted-foreground/60 mt-0.5">{runner.repo}</span>
+        )}
       </div>
       <span className={`text-xs ${online ? 'text-green-400' : 'text-muted-foreground'}`}>
         {runner.status}

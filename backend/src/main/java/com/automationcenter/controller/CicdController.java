@@ -84,6 +84,12 @@ public class CicdController {
         return ResponseEntity.ok(cicdService.getWorkflowJobs(user.getId(), owner, repo, runId));
     }
 
+    @GetMapping("/runners")
+    public ResponseEntity<List<Map<String, Object>>> listAllRunners(
+            @AuthenticationPrincipal User user) {
+        return ResponseEntity.ok(cicdService.listAllRunners(user.getId()));
+    }
+
     @GetMapping("/runners/{owner}/{repo}")
     public ResponseEntity<List<Map<String, Object>>> listRunners(
             @PathVariable String owner,

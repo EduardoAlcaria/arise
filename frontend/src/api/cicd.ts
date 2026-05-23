@@ -28,6 +28,7 @@ export interface Runner {
   status: string
   busy: boolean
   labels: string[]
+  repo?: string
 }
 
 export const getWorkflows = (owner: string, repo: string) =>
@@ -56,3 +57,6 @@ export const triggerByPush = (owner: string, repo: string, ref: string) =>
 
 export const setupRunner = (owner: string, repo: string, machineId: number) =>
   client.post(`/cicd/runner/${owner}/${repo}/setup`, null, { params: { machineId } })
+
+export const listAllRunners = () =>
+  client.get<Runner[]>('/cicd/runners').then(r => r.data)
