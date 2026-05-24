@@ -22,6 +22,12 @@ public class SshService {
 
     private static final int CONNECT_TIMEOUT_MS = 30_000;
 
+    private final SshHostKeyStore hostKeyStore;
+
+    public SshService(SshHostKeyStore hostKeyStore) {
+        this.hostKeyStore = hostKeyStore;
+    }
+
     /**
      * Build a configured, ready-to-connect JSch Session for the given machine.
      * Handles DIRECT, CLOUDFLARE_TCP, and PROXY_COMMAND tunnel modes.
@@ -30,6 +36,7 @@ public class SshService {
     public Session openSession(Machine machine) throws Exception {
         JSch jsch = new JSch();
         jsch.addIdentity("key", machine.getPrivateKey().getBytes(StandardCharsets.UTF_8), null, null);
+        jsch.setHostKeyRepository(hostKeyStore.repositoryFor(machine.getId()));
 
         TunnelType tunnelType = machine.getTunnelType() != null ? machine.getTunnelType() : TunnelType.DIRECT;
 
@@ -37,7 +44,7 @@ public class SshService {
             case CLOUDFLARE_TCP -> openCloudflaredTcpSession(jsch, machine);
             case PROXY_COMMAND -> {
                 Session session = jsch.getSession(machine.getSshUser(), machine.getHost(), machine.getPort());
-                session.setConfig("StrictHostKeyChecking", "no");
+                session.setConfig("StrictHostKeyChecking", "yes");
                 if (machine.getProxyCommand() != null && !machine.getProxyCommand().isBlank()) {
                     session.setProxy(new ProcessProxy(machine.getProxyCommand()));
                 }
@@ -45,7 +52,7 @@ public class SshService {
             }
             default -> {
                 Session session = jsch.getSession(machine.getSshUser(), machine.getHost(), machine.getPort());
-                session.setConfig("StrictHostKeyChecking", "no");
+                session.setConfig("StrictHostKeyChecking", "yes");
                 yield session;
             }
         };
@@ -77,7 +84,7 @@ public class SshService {
         }
 
         Session session = jsch.getSession(machine.getSshUser(), "127.0.0.1", localPort);
-        session.setConfig("StrictHostKeyChecking", "no");
+        session.setConfig("StrictHostKeyChecking", "yes");
 
         // Kill cloudflared when the JSch session closes.
         // Must wait for connect() to be called first — isConnected() is false until then.
@@ -171,7 +178,8 @@ public class SshService {
     public SshCommandResponse writeFileViaShell(Machine machine, String remotePath, String content) {
         String b64 = Base64.getEncoder().encodeToString(content.getBytes(StandardCharsets.UTF_8));
         String safePath = remotePath.replace("'", "'\\''");
-        String cmd = "mkdir -p \"$(dirname '" + safePath + "')\" && echo '" + b64 + "' | base64 -d > '" + safePath + "'";
+        // b64 is [A-Za-z0-9+/=] only — printf is used instead of echo to avoid flag interpretation
+        String cmd = "mkdir -p \"$(dirname '" + safePath + "')\" && printf '%s' '" + b64 + "' | base64 -d > '" + safePath + "'";
         return execute(machine, cmd);
     }
 }
