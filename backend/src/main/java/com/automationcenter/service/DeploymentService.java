@@ -80,6 +80,9 @@ public class DeploymentService {
             }
         }
 
+        if (request.getWebhookUrl() != null && !request.getWebhookUrl().isBlank()) {
+            builder.webhookUrl(request.getWebhookUrl());
+        }
         Deployment deployment = deploymentRepository.save(builder.build());
         final Long deploymentId = deployment.getId();
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
@@ -590,6 +593,7 @@ public class DeploymentService {
                 .cloudfareTunnelUrl(d.getCloudfareTunnelUrl())
                 .deployDir(d.getDeployDir())
                 .resolvedCommitSha(d.getResolvedCommitSha())
+                .webhookUrl(d.getWebhookUrl())
                 .machineId(d.getMachine() != null ? d.getMachine().getId() : null)
                 .machineName(d.getMachine() != null ? d.getMachine().getName() : null)
                 .ownerId(d.getOwner().getId())

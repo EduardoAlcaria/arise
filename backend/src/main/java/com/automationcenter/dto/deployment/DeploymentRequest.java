@@ -23,4 +23,5 @@ public class DeploymentRequest {
     private String tunnelName;
     private String tunnelHostname;
     private Integer tunnelAppPort;
+    private String webhookUrl;
 }

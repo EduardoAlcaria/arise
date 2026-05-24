@@ -57,6 +57,9 @@ public class Deployment {
 
     private String resolvedCommitSha;
 
+    @Column(columnDefinition = "TEXT")
+    private String webhookUrl;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "machine_id")
     private Machine machine;

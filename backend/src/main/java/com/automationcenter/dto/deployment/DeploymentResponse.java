@@ -25,6 +25,7 @@ public class DeploymentResponse {
     private String cloudfareTunnelUrl;
     private String deployDir;
     private String resolvedCommitSha;
+    private String webhookUrl;
     private Long machineId;
     private String machineName;
     private Long ownerId;
