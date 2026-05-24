@@ -4,9 +4,11 @@ import type { EcsCluster } from '../api/aws'
 import {
   listEc2Instances, listS3Buckets, listEcsClusters, listEcsServices,
   startInstance, stopInstance, terminateInstance, listTraces, getTopology,
+  getExplorer,
 } from '../api/aws'
 import { listAwsAccounts, createAwsAccount, updateAwsAccount, deleteAwsAccount, ssoLogin } from '../api/awsAccounts'
 import type { AwsAccountResponse } from '../api/awsAccounts'
+import type { AwsExplorerResponse, VpcSummary } from '../types'
 import {
   Server, HardDrive, Box, Play, Square, Trash2, ChevronDown, ChevronRight,
   AlertTriangle, Loader2, RefreshCw, Plus, X, CheckCircle, Network,
@@ -822,6 +824,172 @@ function TracesTab({ accountId, region }: { accountId: number; region: string })
               {t.hasFault ? 'Fault' : 'Error'}
             </span>
           )}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ── Explorer components ───────────────────────────────────────────────────────
+
+interface TreeSelection {
+  accountId: number
+  region: string
+  vpcId: string | null
+}
+
+function ResourceTree({
+  accounts,
+  selected,
+  onSelect,
+}: {
+  accounts: AwsAccountResponse[]
+  selected: TreeSelection | null
+  onSelect: (sel: TreeSelection) => void
+}) {
+  const [expandedAccounts, setExpandedAccounts] = useState<Set<number>>(new Set())
+  const [expandedRegions, setExpandedRegions] = useState<Set<string>>(new Set())
+  const [activeRegion, setActiveRegion] = useState<{ accountId: number; region: string } | null>(null)
+
+  const { data: explorerData } = useQuery({
+    queryKey: ['aws-explorer', activeRegion?.accountId, activeRegion?.region],
+    queryFn: () => getExplorer(activeRegion!.accountId, activeRegion!.region),
+    enabled: !!activeRegion,
+    staleTime: 5 * 60 * 1000,
+  })
+
+  function toggleAccount(id: number) {
+    setExpandedAccounts(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
+
+  function toggleRegion(accountId: number, region: string) {
+    const key = `${accountId}:${region}`
+    setExpandedRegions(prev => {
+      const next = new Set(prev)
+      if (next.has(key)) {
+        next.delete(key)
+      } else {
+        next.add(key)
+        setActiveRegion({ accountId, region })
+      }
+      return next
+    })
+  }
+
+  const isRegionExpanded = (accountId: number, region: string) =>
+    expandedRegions.has(`${accountId}:${region}`)
+
+  const isVpcSelected = (accountId: number, region: string, vpcId: string | null) =>
+    selected?.accountId === accountId &&
+    selected?.region === region &&
+    selected?.vpcId === vpcId
+
+  return (
+    <div style={{
+      width: 264, flexShrink: 0, borderRight: '1px solid #27272a',
+      overflowY: 'auto', background: '#111113', padding: '12px 0',
+    }}>
+      <div style={{ padding: '0 12px 8px', fontSize: 10, fontWeight: 700, color: '#52525b', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+        Accounts
+      </div>
+      {accounts.map(account => (
+        <div key={account.id}>
+          <button
+            onClick={() => toggleAccount(account.id)}
+            style={{
+              width: '100%', display: 'flex', alignItems: 'center', gap: 6,
+              padding: '5px 12px', background: 'none', border: 'none', cursor: 'pointer',
+              color: '#a1a1aa', fontSize: 12, fontWeight: 600, textAlign: 'left',
+            }}
+          >
+            {expandedAccounts.has(account.id)
+              ? <ChevronDown size={12} style={{ color: '#71717a', flexShrink: 0 }} />
+              : <ChevronRight size={12} style={{ color: '#71717a', flexShrink: 0 }} />}
+            <HardDrive size={12} style={{ color: '#60a5fa', flexShrink: 0 }} />
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {account.name}
+            </span>
+            {account.reachable
+              ? <div style={{ width: 5, height: 5, borderRadius: '50%', background: '#4ade80', marginLeft: 'auto', flexShrink: 0 }} />
+              : <div style={{ width: 5, height: 5, borderRadius: '50%', background: '#f87171', marginLeft: 'auto', flexShrink: 0 }} />}
+          </button>
+
+          {expandedAccounts.has(account.id) && REGIONS.map(region => (
+            <div key={region}>
+              <button
+                onClick={() => toggleRegion(account.id, region)}
+                style={{
+                  width: '100%', display: 'flex', alignItems: 'center', gap: 6,
+                  padding: '4px 12px 4px 28px', background: 'none', border: 'none',
+                  cursor: 'pointer', color: '#71717a', fontSize: 11, textAlign: 'left',
+                }}
+              >
+                {isRegionExpanded(account.id, region)
+                  ? <ChevronDown size={10} style={{ flexShrink: 0 }} />
+                  : <ChevronRight size={10} style={{ flexShrink: 0 }} />}
+                <span style={{ fontFamily: 'monospace', fontSize: 11 }}>{region}</span>
+              </button>
+
+              {isRegionExpanded(account.id, region) && (
+                <div>
+                  {!explorerData || explorerData.region !== region ? (
+                    <div style={{ padding: '4px 12px 4px 44px', fontSize: 10, color: '#52525b' }}>
+                      <Loader2 size={10} className="animate-spin" style={{ display: 'inline', marginRight: 4 }} />
+                      Loading…
+                    </div>
+                  ) : (
+                    <>
+                      {explorerData.vpcs.map(vpc => (
+                        <button
+                          key={vpc.vpcId}
+                          onClick={() => onSelect({ accountId: account.id, region, vpcId: vpc.vpcId })}
+                          style={{
+                            width: '100%', display: 'flex', alignItems: 'center', gap: 6,
+                            padding: '5px 12px 5px 44px',
+                            background: isVpcSelected(account.id, region, vpc.vpcId) ? '#1e3a5f' : 'none',
+                            border: 'none', cursor: 'pointer',
+                            color: isVpcSelected(account.id, region, vpc.vpcId) ? '#93c5fd' : '#a1a1aa',
+                            fontSize: 11, textAlign: 'left',
+                          }}
+                        >
+                          <Network size={10} style={{ flexShrink: 0 }} />
+                          <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {vpc.name}
+                          </span>
+                          {vpc.ec2Count > 0 && (
+                            <span style={{ fontSize: 9, color: '#4ade80', background: '#4ade8015', padding: '1px 5px', borderRadius: 10, flexShrink: 0 }}>
+                              {vpc.ec2Count}
+                            </span>
+                          )}
+                        </button>
+                      ))}
+                      <button
+                        onClick={() => onSelect({ accountId: account.id, region, vpcId: null })}
+                        style={{
+                          width: '100%', display: 'flex', alignItems: 'center', gap: 6,
+                          padding: '5px 12px 5px 44px',
+                          background: isVpcSelected(account.id, region, null) ? '#2a1f3d' : 'none',
+                          border: 'none', cursor: 'pointer',
+                          color: isVpcSelected(account.id, region, null) ? '#c4b5fd' : '#71717a',
+                          fontSize: 11, textAlign: 'left',
+                        }}
+                      >
+                        <Zap size={10} style={{ flexShrink: 0 }} />
+                        <span style={{ flex: 1 }}>Global Resources</span>
+                        <span style={{ fontSize: 9, color: '#71717a', flexShrink: 0 }}>
+                          {explorerData.lambdaCount}λ · {explorerData.s3Count}S3
+                        </span>
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          ))}
         </div>
       ))}
     </div>
