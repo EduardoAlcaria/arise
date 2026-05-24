@@ -1145,6 +1145,167 @@ function VpcDetail({
   )
 }
 
+function GlobalDetail({ accountId, region }: { accountId: number; region: string }) {
+  const { data: buckets, isLoading: s3Loading } = useQuery({
+    queryKey: ['s3-buckets', accountId],
+    queryFn: () => listS3Buckets(accountId),
+    staleTime: 15 * 60 * 1000,
+  })
+
+  const { data: clusters, isLoading: ecsLoading } = useQuery({
+    queryKey: ['ecs-clusters', accountId, region],
+    queryFn: () => listEcsClusters(accountId, region),
+    staleTime: 2 * 60 * 1000,
+  })
+
+  return (
+    <div style={{ flex: 1, overflowY: 'auto', padding: 24 }}>
+      <div style={{ fontSize: 16, fontWeight: 700, color: '#f1f5f9', marginBottom: 4 }}>Global Resources</div>
+      <div style={{ fontSize: 11, color: '#64748b', marginBottom: 20 }}>{region} · Lambda · S3 · ECS</div>
+
+      <div style={{ marginBottom: 24 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>
+          ECS Clusters
+        </div>
+        {ecsLoading
+          ? <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#64748b', fontSize: 13 }}><Loader2 size={14} className="animate-spin" />Loading…</div>
+          : !clusters?.length
+            ? <div style={{ fontSize: 13, color: '#52525b' }}>No ECS clusters</div>
+            : clusters.map((c: any) => <EcsClusterRow key={c.clusterArn} accountId={accountId} cluster={c} />)
+        }
+      </div>
+
+      <div>
+        <div style={{ fontSize: 11, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>
+          S3 Buckets ({buckets?.length ?? 0})
+        </div>
+        {s3Loading
+          ? <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#64748b', fontSize: 13 }}><Loader2 size={14} className="animate-spin" />Loading…</div>
+          : !buckets?.length
+            ? <div style={{ fontSize: 13, color: '#52525b' }}>No S3 buckets</div>
+            : <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {buckets.map((b: any) => (
+                  <div key={b.name} className="bg-card border border-border rounded-xl px-4 py-3 flex items-center gap-3">
+                    <div style={{ width: 28, height: 28, borderRadius: 6, background: '#18181b', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                      <HardDrive size={12} style={{ color: '#64748b' }} />
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 500, color: '#f1f5f9', fontFamily: 'monospace' }}>{b.name}</div>
+                      {b.creationDate && <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>Created {new Date(b.creationDate).toLocaleDateString()}</div>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+        }
+      </div>
+    </div>
+  )
+}
+
+function VpcTopologyModal({ accountId, region, vpc, onClose }: {
+  accountId: number
+  region: string
+  vpc: VpcSummary
+  onClose: () => void
+}) {
+  const { data: topo, isLoading } = useQuery({
+    queryKey: ['topology', accountId, region],
+    queryFn: () => getTopology(accountId, region),
+    staleTime: 5 * 60 * 1000,
+  })
+
+  const [rfNodes, setRfNodes, onNodesChange] = useNodesState<Node>([])
+  const [rfEdges, setRfEdges, onEdgesChange] = useEdgesState<Edge>([])
+  const [selectedNode, setSelectedNode] = useState<any>(null)
+  const [search, setSearch] = useState('')
+
+  useEffect(() => {
+    if (!topo?.nodes) return
+    const vpcNodeIds = new Set<string>()
+    vpcNodeIds.add('vpc:' + vpc.vpcId)
+    topo.edges.forEach((e: any) => {
+      if (e.source === 'vpc:' + vpc.vpcId) vpcNodeIds.add(e.target)
+    })
+    topo.edges.forEach((e: any) => {
+      if (vpcNodeIds.has(e.source)) vpcNodeIds.add(e.target)
+    })
+    const filteredNodes = topo.nodes.filter((n: any) => vpcNodeIds.has(n.id))
+    const filteredEdges = topo.edges.filter((e: any) => vpcNodeIds.has(e.source) && vpcNodeIds.has(e.target))
+    const { nodes, edges } = buildGroupedLayout(filteredNodes, filteredEdges, search)
+    setRfNodes(nodes)
+    setRfEdges(edges)
+  }, [topo, search, vpc.vpcId])
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center',
+      background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(4px)', padding: 24,
+    }}>
+      <div style={{
+        display: 'flex', flexDirection: 'column', width: '100%', maxWidth: 1100,
+        height: '85vh', borderRadius: 16, overflow: 'hidden',
+        background: '#0d1117', border: '1px solid #30363d',
+      }}>
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '12px 20px', borderBottom: '1px solid #21262d', background: '#161b22', flexShrink: 0,
+        }}>
+          <div>
+            <span style={{ fontSize: 14, fontWeight: 700, color: '#e6edf3' }}>{vpc.name} — Topology</span>
+            <span style={{ fontSize: 11, color: '#64748b', fontFamily: 'monospace', marginLeft: 10 }}>{vpc.vpcId} · {vpc.cidr}</span>
+          </div>
+          <button onClick={onClose} style={{ color: '#64748b', background: 'none', border: 'none', cursor: 'pointer', fontSize: 18 }}>✕</button>
+        </div>
+        <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
+          {isLoading && (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 8, color: '#64748b', fontSize: 13 }}>
+              <Loader2 size={16} className="animate-spin" />Building topology…
+            </div>
+          )}
+          {!isLoading && (
+            <ReactFlow
+              nodes={rfNodes} edges={rfEdges}
+              onNodesChange={onNodesChange} onEdgesChange={onEdgesChange}
+              nodeTypes={awsNodeTypes}
+              onNodeClick={(_, node) => setSelectedNode(node)}
+              onPaneClick={() => setSelectedNode(null)}
+              fitView fitViewOptions={{ padding: 0.3 }} minZoom={0.08}
+              style={{ background: '#010409' }}
+            >
+              <Background variant={BackgroundVariant.Dots} gap={24} size={1.5} color="#21262d" />
+              <Controls style={{ background: '#161b22', border: '1px solid #30363d' }} />
+              <MiniMap pannable zoomable style={{ background: '#161b22', border: '1px solid #30363d' }} />
+              <Panel position="top-left">
+                <div style={{ position: 'relative' }}>
+                  <Search size={12} style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', color: '#64748b', pointerEvents: 'none' }} />
+                  <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search…"
+                    style={{ padding: '5px 8px 5px 26px', background: '#161b22', border: '1px solid #30363d', borderRadius: 6, fontSize: 12, color: '#e6edf3', outline: 'none', width: 180 }} />
+                </div>
+              </Panel>
+            </ReactFlow>
+          )}
+          {selectedNode && (
+            <div style={{ position: 'absolute', top: 16, right: 16, width: 240, zIndex: 10, background: '#161b22', border: '1px solid #30363d', borderRadius: 10, padding: 14, boxShadow: '0 4px 24px rgba(0,0,0,0.5)', maxHeight: '70%', overflowY: 'auto' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                <span style={{ fontWeight: 600, fontSize: 12, color: '#e6edf3' }}>{selectedNode.data.label}</span>
+                <button onClick={() => setSelectedNode(null)} style={{ color: '#64748b', background: 'none', border: 'none', cursor: 'pointer' }}>✕</button>
+              </div>
+              {Object.entries(selectedNode.data as Record<string, unknown>)
+                .filter(([k, v]) => k !== 'id' && k !== 'label' && v != null && v !== '')
+                .map(([k, v]) => (
+                  <div key={k} style={{ marginBottom: 6 }}>
+                    <div style={{ fontSize: 9, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{k}</div>
+                    <div style={{ fontSize: 11, color: '#e2e8f0', fontFamily: 'monospace', wordBreak: 'break-all' }}>{String(v)}</div>
+                  </div>
+                ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 type Tab = 'ec2' | 's3' | 'ecs' | 'topology' | 'traces'
