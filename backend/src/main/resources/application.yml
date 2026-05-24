@@ -45,6 +45,9 @@ management:
     health:
       show-details: always
 
+encryption:
+  secret: ${ENCRYPTION_SECRET:change-me-in-production-use-32-chars}
+
 logging:
   level:
     com.automationcenter: DEBUG
