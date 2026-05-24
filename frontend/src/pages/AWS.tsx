@@ -847,11 +847,13 @@ function ResourceTree({
   selected: TreeSelection | null
   onSelect: (sel: TreeSelection) => void
 }) {
+  const qcTree = useQueryClient()
   const [expandedAccounts, setExpandedAccounts] = useState<Set<number>>(new Set())
   const [expandedRegions, setExpandedRegions] = useState<Set<string>>(new Set())
   const [activeRegion, setActiveRegion] = useState<{ accountId: number; region: string } | null>(null)
 
-  const { data: explorerData } = useQuery({
+  // Trigger fetch when a region is expanded; read per-(accountId,region) cache in render
+  useQuery({
     queryKey: ['aws-explorer', activeRegion?.accountId, activeRegion?.region],
     queryFn: () => getExplorer(activeRegion!.accountId, activeRegion!.region),
     enabled: !!activeRegion,
@@ -936,14 +938,17 @@ function ResourceTree({
 
               {isRegionExpanded(account.id, region) && (
                 <div>
-                  {!explorerData || explorerData.region !== region ? (
-                    <div style={{ padding: '4px 12px 4px 44px', fontSize: 10, color: '#52525b' }}>
-                      <Loader2 size={10} className="animate-spin" style={{ display: 'inline', marginRight: 4 }} />
-                      Loading…
-                    </div>
-                  ) : (
+                  {(() => {
+                    const regionData = qcTree.getQueryData<AwsExplorerResponse>(['aws-explorer', account.id, region])
+                    if (!regionData) return (
+                      <div style={{ padding: '4px 12px 4px 44px', fontSize: 10, color: '#52525b' }}>
+                        <Loader2 size={10} className="animate-spin" style={{ display: 'inline', marginRight: 4 }} />
+                        Loading…
+                      </div>
+                    )
+                    return (
                     <>
-                      {explorerData.vpcs.map(vpc => (
+                      {regionData.vpcs.map(vpc => (
                         <button
                           key={vpc.vpcId}
                           onClick={() => onSelect({ accountId: account.id, region, vpcId: vpc.vpcId })}
@@ -981,11 +986,12 @@ function ResourceTree({
                         <Zap size={10} style={{ flexShrink: 0 }} />
                         <span style={{ flex: 1 }}>Global Resources</span>
                         <span style={{ fontSize: 9, color: '#71717a', flexShrink: 0 }}>
-                          {explorerData.lambdaCount}λ · {explorerData.s3Count}S3
+                          {regionData.lambdaCount}λ · {regionData.s3Count}S3
                         </span>
                       </button>
                     </>
-                  )}
+                    )
+                  })()}
                 </div>
               )}
             </div>
