@@ -33,9 +33,11 @@ public class User implements UserDetails {
     @Column(nullable = false)
     private Role role;
 
+    @Convert(converter = com.automationcenter.converter.AesGcmConverter.class)
     @Column(columnDefinition = "TEXT")
     private String githubToken;
 
+    @Convert(converter = com.automationcenter.converter.AesGcmConverter.class)
     @Column(columnDefinition = "TEXT")
     private String cloudflareToken;
 
