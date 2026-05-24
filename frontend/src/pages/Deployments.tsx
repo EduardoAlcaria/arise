@@ -169,6 +169,7 @@ export default function Deployments() {
           repositoryUrl: item.repoUrl, branch: item.branch, machineId: item.machineId,
           tunnelName: item.tunnelName, tunnelHostname: item.tunnelHostname, tunnelAppPort: item.tunnelAppPort,
           configFiles: item.configFiles,
+          webhookUrl: item.webhookUrl,
         })
         if (!first) first = dep
       }
@@ -185,6 +186,7 @@ export default function Deployments() {
         name: payload.name, type: 'APPLICATION', machineId: payload.machineId,
         services: payload.services, configFiles: payload.configFiles,
         tunnelName: payload.tunnelName, tunnelHostname: payload.tunnelHostname, tunnelAppPort: payload.tunnelAppPort,
+        webhookUrl: payload.webhookUrl,
       })
       qc.invalidateQueries({ queryKey: ['deployments-all'] })
       setShowWizard(false)
@@ -270,6 +272,11 @@ export default function Deployments() {
                     {group.latest.repositoryUrl && (
                       <p className="text-[11px] text-muted-foreground font-mono truncate mt-0.5">
                         {group.latest.repositoryUrl.replace('https://github.com/', '')}
+                      </p>
+                    )}
+                    {group.latest.webhookUrl && (
+                      <p className="text-[11px] text-muted-foreground/60 font-mono truncate mt-0.5">
+                        hook: {group.latest.webhookUrl}
                       </p>
                     )}
                     {hasTunnel && (
