@@ -15,7 +15,6 @@ import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CompletableFuture;
 
 @Service
 @RequiredArgsConstructor
@@ -27,6 +26,7 @@ public class CicdService {
     private final SshService sshService;
     private final UserRepository userRepository;
     private final WebClient.Builder webClientBuilder;
+    private final RunnerSetupTracker runnerSetupTracker;
 
     @SuppressWarnings("unchecked")
     public List<String> detectWorkflows(Long userId, String owner, String repo) {
@@ -83,21 +83,22 @@ public class CicdService {
     }
 
     @Async
-    public CompletableFuture<String> setupRunner(Long userId, Long machineId, String owner, String repo) {
+    public void setupRunner(Long userId, Long machineId, String owner, String repo, String sessionId) {
         StringBuilder output = new StringBuilder();
         try {
             Map<String, String> tokenData = gitHubService.getRunnerRegistrationToken(userId, owner, repo);
             String token = tokenData.get("token");
             if (token == null || token.isBlank()) {
-                return CompletableFuture.completedFuture("ERROR: Could not obtain runner registration token. " +
-                        "Ensure your GitHub token has 'repo' scope and you have admin access to the repository.");
+                String err = "ERROR: Could not obtain runner registration token. " +
+                        "Ensure your GitHub token has 'repo' scope and you have admin access to the repository.";
+                runnerSetupTracker.fail(sessionId, err);
+                return;
             }
 
             Machine machine = machineService.findByIdAndOwner(machineId, userId);
             String machineName = machine.getName().replaceAll("[^A-Za-z0-9_-]", "-");
             String version = fetchLatestRunnerVersion();
 
-            // Detect OS and architecture
             var osResult = sshService.execute(machine, "uname -s");
             var archResult = sshService.execute(machine, "uname -m");
             String os = osResult.getStdout().trim().toLowerCase();
@@ -142,11 +143,17 @@ public class CicdService {
                 output.append("\nSTDERR:\n").append(result.getStderr());
             }
             output.append("\nExit code: ").append(result.getExitCode());
+
+            if (result.getExitCode() == 0) {
+                runnerSetupTracker.complete(sessionId, output.toString());
+            } else {
+                runnerSetupTracker.fail(sessionId, output.toString());
+            }
         } catch (Exception e) {
             log.error("Runner setup failed for {}/{}: {}", owner, repo, e.getMessage());
             output.append("ERROR: ").append(e.getMessage());
+            runnerSetupTracker.fail(sessionId, output.toString());
         }
-        return CompletableFuture.completedFuture(output.toString());
     }
 
     public void rerunWorkflow(Long userId, String owner, String repo, Long runId) {
@@ -306,7 +313,8 @@ public class CicdService {
     public List<Map<String, Object>> listAllRunners(Long userId) {
         User user = getUser(userId);
         try {
-            List<Map<String, Object>> repoList = webClientBuilder.build()
+            List<Map<String, Object>> repoList = List.of();
+            repoList = (List<Map<String, Object>>) (List<?>) webClientBuilder.build()
                     .get()
                     .uri("https://api.github.com/user/repos?per_page=100&type=owner")
                     .header("Authorization", "token " + user.getGithubToken())
