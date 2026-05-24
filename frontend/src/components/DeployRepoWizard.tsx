@@ -21,6 +21,7 @@ export interface DeployItem {
   repoUrl: string; branch: string; name: string; machineId: number
   tunnelName?: string; tunnelHostname?: string; tunnelAppPort?: number
   configFiles?: ConfigFileItem[]
+  webhookUrl?: string
 }
 export interface AppDeployPayload {
   name: string
@@ -30,6 +31,7 @@ export interface AppDeployPayload {
   tunnelName?: string
   tunnelHostname?: string
   tunnelAppPort?: number
+  webhookUrl?: string
 }
 
 interface Props {
@@ -71,6 +73,7 @@ export default function DeployRepoWizard({
   const [tunnelName, setTunnelName] = useState('')
   const [tunnelHostname, setTunnelHostname] = useState('')
   const [tunnelAppPort, setTunnelAppPort] = useState(80)
+  const [webhookUrl, setWebhookUrl] = useState('')
 
   // Env vars state
   const [envVarKeys, setEnvVarKeys] = useState<string[]>([])
@@ -248,6 +251,7 @@ export default function DeployRepoWizard({
         machineId,
         ...tunnelFields,
         configFiles: envFile ? [envFile] : undefined,
+        webhookUrl: webhookUrl.trim() || undefined,
       }))
       try { await onDeploy(items) } catch (e: any) { setDeployError(e.message || 'Deployment failed') }
     } else {
@@ -267,6 +271,7 @@ export default function DeployRepoWizard({
           tunnelHostname: tunnelHostname.trim(),
           tunnelAppPort,
         }),
+        webhookUrl: webhookUrl.trim() || undefined,
       }
       try { await onAppDeploy(payload) } catch (e: any) { setDeployError(e.message || 'Deployment failed') }
     }
@@ -709,6 +714,17 @@ export default function DeployRepoWizard({
                 )}
               </div>
 
+              <div className="mt-3.5">
+                <label className="block text-[11px] font-semibold text-muted-foreground mb-1.5 uppercase tracking-widest">Webhook URL <span className="font-normal normal-case">(optional)</span></label>
+                <input
+                  className="input-field mono"
+                  placeholder="https://your-service.com/hooks/deploy"
+                  value={webhookUrl}
+                  onChange={e => setWebhookUrl(e.target.value)}
+                />
+                <p className="text-[11px] text-muted-foreground mt-1">Called via HTTP POST on deployment success.</p>
+              </div>
+
               {deployError && (
                 <div className="flex gap-2 items-center rounded-lg px-3 py-2 mb-3 text-xs text-destructive border border-destructive/20 bg-destructive/5">
                   <AlertTriangle size={12} className="shrink-0" />{deployError}
@@ -865,6 +881,17 @@ export default function DeployRepoWizard({
                   <option value="">Select machine…</option>
                   {machines.map(m => <option key={m.id} value={m.id}>{m.name} ({m.host})</option>)}
                 </select>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-muted-foreground mb-1.5 uppercase tracking-widest">Webhook URL <span className="font-normal normal-case">(optional)</span></label>
+                <input
+                  className="input-field mono"
+                  placeholder="https://your-service.com/hooks/deploy"
+                  value={webhookUrl}
+                  onChange={e => setWebhookUrl(e.target.value)}
+                />
+                <p className="text-[11px] text-muted-foreground mt-1">Called via HTTP POST on deployment success.</p>
               </div>
 
               {deployError && (
