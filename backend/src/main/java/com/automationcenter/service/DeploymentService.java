@@ -201,6 +201,11 @@ public class DeploymentService {
                 }
             }
 
+            if ("compose".equals(stack) && !isWindows) {
+                var psResult = sshService.execute(machine, "cd " + repoDir + " && docker compose ps 2>&1");
+                appendLog(deployment, "--- Container status ---\n" + psResult.getStdout(), LogLevel.INFO);
+            }
+
             // Optional Cloudflare tunnel for repo deployments
             if (deployment.getTunnelName() != null && !deployment.getTunnelName().isBlank()) {
                 try {
@@ -308,6 +313,9 @@ public class DeploymentService {
                 fail(deployment);
                 return;
             }
+
+            var psResult = sshService.execute(machine, "cd " + baseDir + " && docker compose ps 2>&1");
+            appendLog(deployment, "--- Container status ---\n" + psResult.getStdout(), LogLevel.INFO);
 
             if (deployment.getTunnelName() != null && !deployment.getTunnelName().isBlank()) {
                 try {
