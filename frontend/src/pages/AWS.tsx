@@ -996,6 +996,155 @@ function ResourceTree({
   )
 }
 
+function VpcDetail({
+  accountId,
+  region,
+  vpc,
+  onViewTopology,
+}: {
+  accountId: number
+  region: string
+  vpc: VpcSummary
+  onViewTopology: () => void
+}) {
+  const qc = useQueryClient()
+  const [confirmTerminate, setConfirmTerminate] = useState<string | null>(null)
+
+  const { data: allInstances, isLoading: ec2Loading } = useQuery({
+    queryKey: ['ec2-instances', accountId, region],
+    queryFn: () => listEc2Instances(accountId, region),
+    staleTime: 2 * 60 * 1000,
+  })
+
+  const { data: clusters, isLoading: ecsLoading } = useQuery({
+    queryKey: ['ecs-clusters', accountId, region],
+    queryFn: () => listEcsClusters(accountId, region),
+    staleTime: 2 * 60 * 1000,
+  })
+
+  const instances = allInstances?.filter((i: any) => i.vpcId === vpc.vpcId) ?? []
+
+  const startMut = useMutation({
+    mutationFn: (id: string) => startInstance(accountId, id, region),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['ec2-instances', accountId, region] }),
+  })
+  const stopMut = useMutation({
+    mutationFn: (id: string) => stopInstance(accountId, id, region),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['ec2-instances', accountId, region] }),
+  })
+  const terminateMut = useMutation({
+    mutationFn: (id: string) => terminateInstance(accountId, id, region),
+    onSuccess: () => { setConfirmTerminate(null); qc.invalidateQueries({ queryKey: ['ec2-instances', accountId, region] }) },
+  })
+
+  return (
+    <div style={{ flex: 1, overflowY: 'auto', padding: 24 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+        <div>
+          <div style={{ fontSize: 16, fontWeight: 700, color: '#f1f5f9' }}>{vpc.name}</div>
+          <div style={{ fontSize: 11, color: '#64748b', fontFamily: 'monospace', marginTop: 2 }}>
+            {vpc.vpcId} · {vpc.cidr} · {region}
+          </div>
+        </div>
+        <button
+          onClick={onViewTopology}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 6,
+            padding: '6px 14px', borderRadius: 8, fontSize: 12, fontWeight: 600,
+            background: '#1e3a5f', color: '#93c5fd', border: '1px solid #1d4ed8',
+            cursor: 'pointer',
+          }}
+        >
+          <Network size={13} />View Topology
+        </button>
+      </div>
+
+      <div style={{ marginBottom: 24 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>
+          EC2 Instances ({instances.length})
+        </div>
+        {ec2Loading && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#64748b', fontSize: 13, padding: '12px 0' }}>
+            <Loader2 size={14} className="animate-spin" />Loading instances…
+          </div>
+        )}
+        {!ec2Loading && instances.length === 0 && (
+          <div style={{ fontSize: 13, color: '#52525b', padding: '12px 0' }}>No EC2 instances in this VPC</div>
+        )}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {instances.map((inst: any) => (
+            <div key={inst.instanceId} className="bg-card border border-border rounded-xl p-4">
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                  <div style={{ width: 32, height: 32, borderRadius: 8, background: '#18181b', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <Server size={14} style={{ color: '#64748b' }} />
+                  </div>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: '#f1f5f9', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {inst.name ?? inst.instanceId}
+                    </div>
+                    <div style={{ fontSize: 11, color: '#64748b', fontFamily: 'monospace', marginTop: 2 }}>
+                      {inst.instanceId} · {inst.instanceType}
+                    </div>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                  <span className={`flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full border ${stateColor(inst.state)}`}>
+                    <span style={{ width: 5, height: 5, borderRadius: '50%', background: 'currentColor', display: 'inline-block' }} />
+                    {inst.state}
+                  </span>
+                  {inst.state === 'stopped' && (
+                    <button onClick={() => startMut.mutate(inst.instanceId)} disabled={startMut.isPending}
+                      className="flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-lg bg-green-500/10 text-green-400 border border-green-500/20 hover:bg-green-500/20 disabled:opacity-50 transition-all">
+                      {startMut.isPending ? <Loader2 size={10} className="animate-spin" /> : <Play size={10} />}Start
+                    </button>
+                  )}
+                  {inst.state === 'running' && (
+                    <button onClick={() => stopMut.mutate(inst.instanceId)} disabled={stopMut.isPending}
+                      className="flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-lg bg-muted text-muted-foreground border border-border hover:bg-muted/70 disabled:opacity-50 transition-all">
+                      {stopMut.isPending ? <Loader2 size={10} className="animate-spin" /> : <Square size={10} />}Stop
+                    </button>
+                  )}
+                  {inst.state !== 'terminated' && (
+                    confirmTerminate === inst.instanceId ? (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <button onClick={() => terminateMut.mutate(inst.instanceId)} disabled={terminateMut.isPending}
+                          className="text-[11px] font-semibold px-2.5 py-1 rounded-lg bg-destructive/10 text-destructive border border-destructive/20 hover:bg-destructive/20 transition-all">
+                          Confirm
+                        </button>
+                        <button onClick={() => setConfirmTerminate(null)} className="text-[11px] text-muted-foreground px-2">Cancel</button>
+                      </div>
+                    ) : (
+                      <button onClick={() => setConfirmTerminate(inst.instanceId)}
+                        className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors">
+                        <Trash2 size={12} />
+                      </button>
+                    )
+                  )}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <div style={{ fontSize: 11, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>
+          ECS Clusters ({clusters?.length ?? 0})
+        </div>
+        {ecsLoading && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#64748b', fontSize: 13, padding: '12px 0' }}>
+            <Loader2 size={14} className="animate-spin" />Loading clusters…
+          </div>
+        )}
+        {!ecsLoading && clusters?.map((c: any) => (
+          <EcsClusterRow key={c.clusterArn} accountId={accountId} cluster={c} />
+        ))}
+      </div>
+    </div>
+  )
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 type Tab = 'ec2' | 's3' | 'ecs' | 'topology' | 'traces'
