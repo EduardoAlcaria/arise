@@ -2,6 +2,7 @@ package com.automationcenter.converter;
 
 import jakarta.persistence.AttributeConverter;
 import jakarta.persistence.Converter;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -16,6 +17,7 @@ import java.util.Base64;
 
 @Component
 @Converter
+@Slf4j
 public class AesGcmConverter implements AttributeConverter<String, String> {
 
     private static final String PREFIX = "ENC:";
@@ -25,6 +27,9 @@ public class AesGcmConverter implements AttributeConverter<String, String> {
     private final byte[] keyBytes;
 
     public AesGcmConverter(@Value("${encryption.secret}") String secret) throws Exception {
+        if (secret == null || secret.isBlank() || secret.equals("change-me-in-production-use-32-chars")) {
+            log.warn("[SECURITY] ENCRYPTION_SECRET is not set or uses the insecure default value. Set the ENCRYPTION_SECRET environment variable in production!");
+        }
         MessageDigest sha = MessageDigest.getInstance("SHA-256");
         keyBytes = sha.digest(secret.getBytes(StandardCharsets.UTF_8));
     }
