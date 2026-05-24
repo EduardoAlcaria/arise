@@ -59,6 +59,7 @@ export interface Deployment {
   startedAt: string | null
   finishedAt: string | null
   createdAt: string
+  webhookUrl?: string | null
 }
 
 export interface LogEntry {
