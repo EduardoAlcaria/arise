@@ -1,4 +1,5 @@
 import client from './client'
+import type { AwsExplorerResponse } from '../types'
 
 export interface Ec2Instance {
   instanceId: string
@@ -104,3 +105,11 @@ export const getTrace = (accountId: number, traceId: string, region?: string) =>
   client.get<{ id: string; duration: number; segments: { id: string; document: string }[] }>(
     `${base(accountId)}/traces/${traceId}`, { params: region ? { region } : {} }
   ).then(r => r.data)
+
+export const getExplorer = (accountId: number, region: string) =>
+  client.get<AwsExplorerResponse>('/aws/explorer', { params: { accountId, region } })
+    .then(r => r.data)
+
+export const evictAwsCache = (accountId: number) =>
+  client.post<void>(`/aws/accounts/${accountId}/cache/evict`)
+    .then(r => r.data)

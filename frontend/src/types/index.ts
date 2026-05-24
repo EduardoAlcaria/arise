@@ -113,3 +113,19 @@ export interface ApiError {
   message: string
   timestamp: string
 }
+
+export interface VpcSummary {
+  vpcId: string
+  name: string
+  cidr: string
+  ec2Count: number
+  subnetCount: number
+}
+
+export interface AwsExplorerResponse {
+  region: string
+  vpcs: VpcSummary[]
+  lambdaCount: number
+  ecsClusterCount: number
+  s3Count: number
+}
