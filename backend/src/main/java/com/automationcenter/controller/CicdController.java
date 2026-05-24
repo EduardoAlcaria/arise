@@ -2,6 +2,7 @@ package com.automationcenter.controller;
 
 import com.automationcenter.entity.User;
 import com.automationcenter.service.CicdService;
+import com.automationcenter.service.RunnerSetupTracker;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -9,7 +10,6 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CompletableFuture;
 
 @RestController
 @RequestMapping("/api/cicd")
@@ -17,6 +17,7 @@ import java.util.concurrent.CompletableFuture;
 public class CicdController {
 
     private final CicdService cicdService;
+    private final RunnerSetupTracker runnerSetupTracker;
 
     @GetMapping("/workflows/{owner}/{repo}")
     public ResponseEntity<List<String>> detectWorkflows(
@@ -42,8 +43,16 @@ public class CicdController {
             @PathVariable String repo,
             @RequestParam Long machineId,
             @AuthenticationPrincipal User user) {
-        cicdService.setupRunner(user.getId(), machineId, owner, repo);
-        return ResponseEntity.accepted().body(Map.of("message", "Runner setup started asynchronously"));
+        String sessionId = runnerSetupTracker.create();
+        cicdService.setupRunner(user.getId(), machineId, owner, repo, sessionId);
+        return ResponseEntity.accepted().body(Map.of("sessionId", sessionId));
+    }
+
+    @GetMapping("/runner/session/{sessionId}")
+    public ResponseEntity<Map<String, String>> getRunnerSession(@PathVariable String sessionId) {
+        var session = runnerSetupTracker.get(sessionId);
+        if (session == null) return ResponseEntity.notFound().build();
+        return ResponseEntity.ok(Map.of("status", session.status(), "output", session.output()));
     }
 
     @GetMapping("/runs/{owner}/{repo}")
