@@ -4,6 +4,8 @@ import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.io.Decoders;
 import io.jsonwebtoken.security.Keys;
+import jakarta.annotation.PostConstruct;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.stereotype.Service;
@@ -13,6 +15,7 @@ import java.util.Date;
 import java.util.function.Function;
 
 @Service
+@Slf4j
 public class JwtService {
 
     @Value("${jwt.secret}")
@@ -20,6 +23,13 @@ public class JwtService {
 
     @Value("${jwt.expiration}")
     private long expiration;
+
+    @PostConstruct
+    public void validateSecret() {
+        if (secret == null || secret.isBlank() || secret.equals("YXV0b21hdGlvbmNlbnRlci1qd3Qtc2VjcmV0LWtleS0zMis=")) {
+            log.warn("[SECURITY] JWT_SECRET is not set or uses the insecure default value. Set the JWT_SECRET environment variable in production!");
+        }
+    }
 
     public String generateToken(UserDetails userDetails) {
         return Jwts.builder()
