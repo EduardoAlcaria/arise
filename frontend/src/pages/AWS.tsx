@@ -4,7 +4,7 @@ import type { EcsCluster } from '../api/aws'
 import {
   listEc2Instances, listS3Buckets, listEcsClusters, listEcsServices,
   startInstance, stopInstance, terminateInstance, listTraces, getTopology,
-  getExplorer,
+  getExplorer, evictAwsCache,
 } from '../api/aws'
 import { listAwsAccounts, createAwsAccount, updateAwsAccount, deleteAwsAccount, ssoLogin } from '../api/awsAccounts'
 import type { AwsAccountResponse } from '../api/awsAccounts'
@@ -1308,16 +1308,13 @@ function VpcTopologyModal({ accountId, region, vpc, onClose }: {
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 
-type Tab = 'ec2' | 's3' | 'ecs' | 'topology' | 'traces'
-
 export default function AWS() {
   const qc = useQueryClient()
   const [showRegister, setShowRegister] = useState(false)
   const [editingAccount, setEditingAccount] = useState<AwsAccountResponse | null>(null)
   const [ssoLoginAccount, setSsoLoginAccount] = useState<AwsAccountResponse | null>(null)
-  const [selectedId, setSelectedId] = useState<number | null>(null)
-  const [tab, setTab] = useState<Tab>('ec2')
-  const [region, setRegion] = useState('us-east-1')
+  const [treeSelection, setTreeSelection] = useState<TreeSelection | null>(null)
+  const [topologyVpc, setTopologyVpc] = useState<VpcSummary | null>(null)
 
   const { data: accounts, isLoading } = useQuery({
     queryKey: ['aws-accounts'],
@@ -1326,98 +1323,141 @@ export default function AWS() {
 
   const deleteMut = useMutation({
     mutationFn: (id: number) => deleteAwsAccount(id),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['aws-accounts'] }); setTreeSelection(null) },
+  })
+
+  const evictMut = useMutation({
+    mutationFn: (id: number) => evictAwsCache(id),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['aws-accounts'] })
-      setSelectedId(null)
+      qc.invalidateQueries({ queryKey: ['aws-explorer'] })
+      qc.invalidateQueries({ queryKey: ['ec2-instances'] })
+      qc.invalidateQueries({ queryKey: ['ecs-clusters'] })
+      qc.invalidateQueries({ queryKey: ['s3-buckets'] })
+      qc.invalidateQueries({ queryKey: ['topology'] })
     },
   })
 
-  const selected = accounts?.find(a => a.id === selectedId) ?? accounts?.[0] ?? null
-  const effectiveId = selected?.id ?? null
+  const { data: explorerData } = useQuery({
+    queryKey: ['aws-explorer', treeSelection?.accountId, treeSelection?.region],
+    queryFn: () => getExplorer(treeSelection!.accountId, treeSelection!.region),
+    enabled: !!treeSelection,
+    staleTime: 5 * 60 * 1000,
+  })
 
-  if (isLoading) return <div className="flex items-center gap-2 text-sm text-muted-foreground p-12 justify-center"><Loader2 size={16} className="animate-spin" />Loading…</div>
+  const resolvedVpc = treeSelection?.vpcId != null
+    ? explorerData?.vpcs.find(v => v.vpcId === treeSelection.vpcId) ?? null
+    : null
 
-  const tabs: { id: Tab; label: string }[] = [
-    { id: 'ec2', label: 'EC2' },
-    { id: 's3', label: 'S3' },
-    { id: 'ecs', label: 'ECS' },
-    { id: 'topology', label: 'Topology' },
-    { id: 'traces', label: 'Traces' },
-  ]
+  if (isLoading) return (
+    <div className="flex items-center gap-2 text-sm text-muted-foreground p-12 justify-center">
+      <Loader2 size={16} className="animate-spin" />Loading…
+    </div>
+  )
+
+  const selectedAccount = treeSelection ? accounts?.find(a => a.id === treeSelection.accountId) ?? null : null
 
   return (
-    <div className="p-6 max-w-6xl mx-auto">
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
       {showRegister && <RegisterModal onClose={() => setShowRegister(false)} />}
       {editingAccount && <RegisterModal editing={editingAccount} onClose={() => setEditingAccount(null)} />}
       {ssoLoginAccount && <SsoLoginModal account={ssoLoginAccount} onClose={() => setSsoLoginAccount(null)} />}
+      {topologyVpc && treeSelection && (
+        <VpcTopologyModal
+          accountId={treeSelection.accountId}
+          region={treeSelection.region}
+          vpc={topologyVpc}
+          onClose={() => setTopologyVpc(null)}
+        />
+      )}
 
-      {/* Account list */}
-      <div className="mb-5">
-        <div className="flex items-center justify-between mb-3">
-          <h1 className="text-lg font-semibold text-foreground">AWS</h1>
+      {/* Top bar */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 20px', borderBottom: '1px solid #27272a', flexShrink: 0 }}>
+        <h1 style={{ fontSize: 15, fontWeight: 700, color: '#f1f5f9' }}>AWS Infrastructure</h1>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {treeSelection && (
+            <button
+              onClick={() => evictMut.mutate(treeSelection.accountId)}
+              disabled={evictMut.isPending}
+              style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '5px 12px', borderRadius: 7, fontSize: 11, fontWeight: 600, background: 'transparent', border: '1px solid #334155', color: '#64748b', cursor: 'pointer' }}
+              title="Refresh cached AWS data"
+            >
+              <RefreshCw size={11} style={{ animation: evictMut.isPending ? 'spin 1s linear infinite' : 'none' }} />
+              Refresh Cache
+            </button>
+          )}
           <button
             onClick={() => setShowRegister(true)}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-xs font-semibold rounded-lg hover:opacity-90 transition-all"
           >
-            <Plus size={12} />Register Account
+            <Plus size={12} />Add Account
           </button>
         </div>
-        {!accounts?.length ? (
-          <div className="flex flex-col items-center justify-center py-16 gap-3 text-center border border-dashed border-border rounded-xl">
-            <HardDrive size={28} className="text-muted-foreground opacity-40" />
-            <div>
-              <p className="text-sm font-semibold text-foreground">No AWS accounts</p>
-              <p className="text-xs text-muted-foreground mt-1">Register an account using your AWS SSO profile.</p>
-            </div>
-            <button onClick={() => setShowRegister(true)} className="flex items-center gap-1.5 px-4 py-2 bg-primary text-primary-foreground text-sm font-semibold rounded-lg hover:opacity-90 transition-all mt-1">
-              <Plus size={13} />Register Account
-            </button>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-            {accounts.map(a => (
-              <AccountCard
-                key={a.id}
-                account={a}
-                selected={selected?.id === a.id}
-                onSelect={() => setSelectedId(a.id)}
-                onEdit={() => setEditingAccount(a)}
-                onSsoLogin={() => setSsoLoginAccount(a)}
-                onDelete={() => deleteMut.mutate(a.id)}
-              />
-            ))}
-          </div>
-        )}
       </div>
 
-      {/* Selected account detail */}
-      {effectiveId !== null && (
-        <>
-          <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
-            <div className="flex gap-1 bg-muted/50 rounded-lg p-1 border border-border">
-              {tabs.map(t => (
-                <button
-                  key={t.id}
-                  onClick={() => setTab(t.id)}
-                  className={`px-3 py-1.5 text-sm font-medium rounded-md transition-all ${tab === t.id ? 'bg-card text-foreground shadow-sm border border-border' : 'text-muted-foreground hover:text-foreground'}`}
-                >
-                  {t.label}
-                </button>
-              ))}
-            </div>
-            {tab !== 's3' && tab !== 'topology' && tab !== 'traces' && (
-              <select value={region} onChange={e => setRegion(e.target.value)} className="input-field text-xs py-1.5 w-auto">
-                {REGIONS.map(r => <option key={r} value={r}>{r}</option>)}
-              </select>
+      {/* No accounts empty state */}
+      {!accounts?.length && (
+        <div className="flex flex-col items-center justify-center flex-1 gap-3 text-center p-12">
+          <HardDrive size={32} className="text-muted-foreground opacity-30" />
+          <div>
+            <p className="text-sm font-semibold text-foreground">No AWS accounts</p>
+            <p className="text-xs text-muted-foreground mt-1">Register an AWS SSO profile to start exploring.</p>
+          </div>
+          <button onClick={() => setShowRegister(true)} className="flex items-center gap-1.5 px-4 py-2 bg-primary text-primary-foreground text-sm font-semibold rounded-lg hover:opacity-90 transition-all mt-1">
+            <Plus size={13} />Register Account
+          </button>
+        </div>
+      )}
+
+      {/* Two-panel explorer */}
+      {!!accounts?.length && (
+        <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+          <ResourceTree
+            accounts={accounts}
+            selected={treeSelection}
+            onSelect={setTreeSelection}
+          />
+
+          {/* Right panel */}
+          <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+            {!treeSelection && (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1, gap: 12, color: '#52525b' }}>
+                <Network size={36} style={{ opacity: 0.25 }} />
+                <div style={{ fontSize: 13, textAlign: 'center' }}>
+                  Select an account in the tree,<br />expand a region, then choose a VPC.
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 16, width: '100%', maxWidth: 480 }}>
+                  {accounts.map(a => (
+                    <AccountCard
+                      key={a.id}
+                      account={a}
+                      selected={false}
+                      onSelect={() => {}}
+                      onEdit={() => setEditingAccount(a)}
+                      onSsoLogin={() => setSsoLoginAccount(a)}
+                      onDelete={() => deleteMut.mutate(a.id)}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {treeSelection && treeSelection.vpcId !== null && selectedAccount && resolvedVpc && (
+              <VpcDetail
+                accountId={treeSelection.accountId}
+                region={treeSelection.region}
+                vpc={resolvedVpc}
+                onViewTopology={() => setTopologyVpc(resolvedVpc)}
+              />
+            )}
+
+            {treeSelection && treeSelection.vpcId === null && (
+              <GlobalDetail
+                accountId={treeSelection.accountId}
+                region={treeSelection.region}
+              />
             )}
           </div>
-
-          {tab === 'ec2' && <Ec2Tab accountId={effectiveId} region={region} />}
-          {tab === 's3' && <S3Tab accountId={effectiveId} />}
-          {tab === 'ecs' && <EcsTab accountId={effectiveId} region={region} />}
-          {tab === 'topology' && <TopologyTab accountId={effectiveId} region={selected?.defaultRegion ?? region} />}
-          {tab === 'traces' && <TracesTab accountId={effectiveId} region={region} />}
-        </>
+        </div>
       )}
     </div>
   )
