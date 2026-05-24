@@ -111,7 +111,9 @@ export function OsIcon({ name, size = 38 }: { name: string; size?: number }) {
 }
 
 export function StackIcon({ stack, size = 28 }: { stack?: string | null; size?: number }) {
-  const cfg = STACK_CFG[detectStack(stack)]
+  const key = detectStack(stack)
+  if (key === 'docker') return <DockerIcon size={size} />
+  const cfg = STACK_CFG[key]
   const radius = Math.round(size * 0.2)
   const fallback = (
     <div style={{ width: size, height: size, background: cfg.bg, borderRadius: radius, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -144,19 +146,17 @@ export function StatusDot({ status }: { status: string }) {
 export function DockerIcon({ size = 22, className = '' }: { size?: number; className?: string }) {
   return (
     <div style={{ width: size, height: size, flexShrink: 0, overflow: 'hidden', borderRadius: Math.round(size * 0.2), background: '#0DB7ED22', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <LogoImg domain="docker.com" size={size} fallback={
-        <svg width={size} height={size} viewBox="0 0 24 24" fill="none" className={className}>
-          <g fill="#0DB7ED">
-            <rect x="1.5" y="12.5" width="3.5" height="3.5" rx="0.4"/>
-            <rect x="6.5" y="12.5" width="3.5" height="3.5" rx="0.4"/>
-            <rect x="11.5" y="12.5" width="3.5" height="3.5" rx="0.4"/>
-            <rect x="6.5" y="7.5" width="3.5" height="3.5" rx="0.4"/>
-            <rect x="11.5" y="7.5" width="3.5" height="3.5" rx="0.4"/>
-            <rect x="11.5" y="2.5" width="3.5" height="3.5" rx="0.4"/>
-            <path d="M22.5 11.5c-.5-3-2.5-4-4-4h-.5c-.3-1.5-1.2-2.5-2-3l-.5.5c.7.6 1.1 1.7 1 2.5H2c-.3 0-.5.2-.5.5v3.5c0 2.5 1 4 2.5 5 1.5 1 3.5 1.5 6 1.5 1.5 0 3-.2 4.2-.7 1-.4 1.8-1 2.3-1.8 1 0 1.8-.4 2.3-1.2.4-.7.7-1.6.7-1.8z"/>
-          </g>
-        </svg>
-      } />
+      <svg width={size * 0.82} height={size * 0.82} viewBox="0 0 24 24" fill="none" className={className}>
+        <g fill="#0DB7ED">
+          <rect x="1.5" y="12.5" width="3.5" height="3.5" rx="0.4"/>
+          <rect x="6.5" y="12.5" width="3.5" height="3.5" rx="0.4"/>
+          <rect x="11.5" y="12.5" width="3.5" height="3.5" rx="0.4"/>
+          <rect x="6.5" y="7.5" width="3.5" height="3.5" rx="0.4"/>
+          <rect x="11.5" y="7.5" width="3.5" height="3.5" rx="0.4"/>
+          <rect x="11.5" y="2.5" width="3.5" height="3.5" rx="0.4"/>
+          <path d="M22.5 11.5c-.5-3-2.5-4-4-4h-.5c-.3-1.5-1.2-2.5-2-3l-.5.5c.7.6 1.1 1.7 1 2.5H2c-.3 0-.5.2-.5.5v3.5c0 2.5 1 4 2.5 5 1.5 1 3.5 1.5 6 1.5 1.5 0 3-.2 4.2-.7 1-.4 1.8-1 2.3-1.8 1 0 1.8-.4 2.3-1.2.4-.7.7-1.6.7-1.8z"/>
+        </g>
+      </svg>
     </div>
   )
 }
@@ -171,13 +171,11 @@ export function GitHubIcon({ size = 22, className = '' }: { size?: number; class
 }
 
 export function CloudflareIcon({ size = 22 }: { size?: number }) {
-  const svgFallback = (
+  return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <path d="M16.5 15.3H7a.5.5 0 010-1H16.5a.5.5 0 010 1z" fill="#F38020"/>
-      <path d="M17.8 12.3H6.2a.5.5 0 010-1H17.8a.5.5 0 010 1z" fill="#F38020"/>
-      <path d="M15.2 9.3H8.8a.5.5 0 010-1H15.2a.5.5 0 010 1z" fill="#F38020"/>
-      <path d="M12 22C6.477 22 2 17.523 2 12S6.477 2 12 2s10 4.477 10 10-4.477 10-10 10z" stroke="#F38020" strokeWidth="1.5" fill="none"/>
+      <path d="M16.312 15.27l.465-1.586a3.37 3.37 0 00-3.27-4.22 3.37 3.37 0 00-3.14 2.17l-.21.57-.59-.05a1.88 1.88 0 00-.2 3.75l6.66-.01a.59.59 0 00.57-.43l-.29.81z" fill="#F6821F"/>
+      <path d="M17.07 13.17l-.13-.01a2.1 2.1 0 00-1.94-1.3 2.12 2.12 0 00-1.98 1.39l-.13.35-.37-.03a1.17 1.17 0 00-.13 2.33h4.45a.37.37 0 00.36-.27l-.13-.44z" fill="#FBAD41"/>
+      <circle cx="12" cy="12" r="10" stroke="#F6821F" strokeWidth="1.2" fill="none"/>
     </svg>
   )
-  return <LogoImg domain="cloudflare.com" size={size} fallback={svgFallback} />
 }
