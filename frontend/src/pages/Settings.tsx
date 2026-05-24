@@ -2,7 +2,8 @@ import { useState } from 'react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { connectInfisical, getInfisicalStatus } from '../api/infisical'
 import { saveCloudflareToken, getCloudflareStatus } from '../api/cloudflare'
-import { Database, Check, AlertTriangle, Loader2, Link2Off, Cloud, Key } from 'lucide-react'
+import { getWebhookToken } from '../api/settings'
+import { Database, Check, AlertTriangle, Loader2, Link2Off, Cloud, Key, Webhook, Copy } from 'lucide-react'
 
 export default function Settings() {
   // Infisical state
@@ -30,6 +31,21 @@ export default function Settings() {
     retry: false,
     staleTime: 30_000,
   })
+
+  const { data: webhookData } = useQuery({
+    queryKey: ['webhook-token'],
+    queryFn: getWebhookToken,
+    staleTime: Infinity,
+  })
+  const webhookUrl = webhookData
+    ? `${window.location.origin}/api/webhooks/github/${webhookData.webhookToken}`
+    : ''
+  const [webhookCopied, setWebhookCopied] = useState(false)
+  const copyWebhookUrl = () => {
+    navigator.clipboard.writeText(webhookUrl)
+    setWebhookCopied(true)
+    setTimeout(() => setWebhookCopied(false), 2000)
+  }
 
   const connectMut = useMutation({
     mutationFn: connectInfisical,
@@ -75,6 +91,45 @@ export default function Settings() {
       </div>
 
       <div className="flex flex-col gap-5">
+        {/* GitHub Webhook section */}
+        <div className="bg-card border border-border rounded-xl overflow-hidden">
+          <div className="px-5 py-4 border-b border-border flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-muted flex items-center justify-center shrink-0">
+              <Webhook size={15} className="text-foreground" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-foreground">GitHub Webhook</p>
+              <p className="text-xs text-muted-foreground">Auto-deploy on push via GitHub webhook</p>
+            </div>
+          </div>
+          <div className="px-5 py-5 flex flex-col gap-3">
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              Add this URL to your GitHub repository (Settings → Webhooks). Set content type to{' '}
+              <code className="font-mono text-[10px] bg-muted px-1 py-0.5 rounded">application/json</code> and use your webhook token as the secret.
+              Pushes to a tracked branch will trigger an automatic redeploy.
+            </p>
+            <div className="flex items-center gap-2">
+              <input
+                readOnly
+                className="input-field mono flex-1 text-xs"
+                value={webhookUrl || 'Loading…'}
+              />
+              <button
+                onClick={copyWebhookUrl}
+                disabled={!webhookUrl}
+                className="flex items-center gap-1.5 px-3 py-2 border border-border text-xs font-medium rounded-lg hover:bg-muted transition-colors shrink-0 disabled:opacity-50"
+              >
+                {webhookCopied ? <><Check size={12} />Copied</> : <><Copy size={12} />Copy</>}
+              </button>
+            </div>
+            {webhookData && (
+              <p className="text-[11px] text-muted-foreground/60">
+                Secret / HMAC key: <code className="font-mono">{webhookData.webhookToken}</code>
+              </p>
+            )}
+          </div>
+        </div>
+
         {/* Cloudflare section */}
         <div className="bg-card border border-border rounded-xl overflow-hidden">
           <div className="px-5 py-4 border-b border-border flex items-center gap-3">
