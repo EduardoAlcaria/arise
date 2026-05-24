@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   getWorkflows, getWorkflowRuns, getWorkflowJobs, listRunners, listAllRunners,
-  rerunWorkflow, triggerWorkflow, triggerByPush, deleteRunner, setupRunner,
+  rerunWorkflow, triggerWorkflow, triggerByPush, deleteRunner, setupRunner, getRunnerSession,
   type WorkflowRun, type WorkflowJob, type Runner,
 } from '../api/cicd'
 import { getRepos } from '../api/github'
@@ -10,7 +10,7 @@ import { getMachines } from '../api/machines'
 import {
   GitBranch, Play, RotateCcw, Trash2, ChevronDown, ChevronRight,
   CheckCircle2, XCircle, Clock, Loader2, Circle, Server, Workflow,
-  Zap, RefreshCw, AlertTriangle, Copy, Check,
+  Zap, RefreshCw, AlertTriangle, Copy, Check, X,
 } from 'lucide-react'
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -294,71 +294,101 @@ function SetupRunnerModal({
   const qc = useQueryClient()
   const { data: machines } = useQuery({ queryKey: ['machines'], queryFn: getMachines })
   const [machineId, setMachineId] = useState<number | ''>('')
+  const [sessionId, setSessionId] = useState<string | null>(null)
 
-  const [started, setStarted] = useState(false)
+  const { data: sessionData } = useQuery({
+    queryKey: ['runner-session', sessionId],
+    queryFn: () => getRunnerSession(sessionId!),
+    enabled: !!sessionId,
+    refetchInterval: q => {
+      const s = q.state.data?.status
+      return s === 'RUNNING' || !s ? 2000 : false
+    },
+  })
 
   const setupMut = useMutation({
     mutationFn: () => setupRunner(owner, repo, machineId as number),
-    onSuccess: () => {
-      setStarted(true)
-      // Poll runners after 30s to check if it appeared
-      setTimeout(() => qc.invalidateQueries({ queryKey: ['cicd-runners'] }), 30_000)
+    onSuccess: (data) => {
+      setSessionId(data.sessionId)
+      setTimeout(() => qc.invalidateQueries({ queryKey: ['cicd-runners'] }), 60_000)
     },
   })
+
+  if (sessionId) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+           style={{ background: 'rgba(1,4,9,0.85)', backdropFilter: 'blur(2px)' }}>
+        <div className="flex flex-col w-full max-w-2xl rounded-xl overflow-hidden"
+             style={{ maxHeight: '80vh', background: '#0d1117', border: '1px solid #30363d' }}>
+          <div className="flex items-center justify-between px-5 py-3 shrink-0"
+               style={{ borderBottom: '1px solid #21262d', background: '#161b22' }}>
+            <div className="flex items-center gap-2">
+              {(!sessionData || sessionData.status === 'RUNNING') && <Loader2 size={14} className="animate-spin" style={{ color: '#58a6ff' }} />}
+              {sessionData?.status === 'DONE' && <CheckCircle2 size={14} style={{ color: '#3fb950' }} />}
+              {sessionData?.status === 'FAILED' && <XCircle size={14} style={{ color: '#f85149' }} />}
+              <span className="text-sm font-semibold" style={{ color: '#e6edf3' }}>
+                Runner Setup — {owner}/{repo}
+              </span>
+            </div>
+            <button onClick={onClose} className="transition-colors" style={{ color: '#484f58' }}>
+              <X size={16} />
+            </button>
+          </div>
+          <div className="flex-1 overflow-y-auto font-mono text-[12px] p-4"
+               style={{ background: '#010409', color: '#8b949e', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+            {sessionData?.output ?? 'Starting…'}
+          </div>
+          <div className="px-5 py-3 shrink-0 flex justify-end"
+               style={{ borderTop: '1px solid #21262d', background: '#161b22' }}>
+            <button
+              onClick={onClose}
+              className="px-3.5 py-1.5 text-xs font-semibold rounded-md"
+              style={{ background: '#30363d', color: '#fff' }}
+            >
+              {(!sessionData || sessionData.status === 'RUNNING') ? 'Hide' : 'Close'}
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60">
       <div className="bg-card border border-border rounded-xl p-6 w-full max-w-sm shadow-2xl space-y-4">
         <h2 className="text-sm font-semibold">Set Up Self-Hosted Runner</h2>
-        {!started ? (
-          <>
-            <p className="text-xs text-muted-foreground">
-              Detects OS/arch, downloads the correct GitHub Actions runner binary via SSH, and registers it with GitHub.
-              Requires the machine's SSH user to have <code>sudo</code> access (Linux) or standard access (macOS).
-            </p>
-            <div>
-              <label className="text-xs text-muted-foreground mb-1 block">Machine</label>
-              <select
-                value={machineId}
-                onChange={e => setMachineId(Number(e.target.value))}
-                className="input w-full"
-              >
-                <option value="">Select machine…</option>
-                {machines?.map(m => (
-                  <option key={m.id} value={m.id}>{m.name} ({m.host})</option>
-                ))}
-              </select>
-            </div>
-            {setupMut.error && (
-              <p className="text-xs text-destructive">
-                {(setupMut.error as any)?.response?.data?.message ?? 'Setup failed'}
-              </p>
-            )}
-          </>
-        ) : (
-          <div className="space-y-2">
-            <div className="flex items-center gap-2 text-green-400 text-sm">
-              <Loader2 size={14} className="animate-spin" />
-              Runner setup running on machine…
-            </div>
-            <p className="text-xs text-muted-foreground">
-              This takes ~1–2 minutes. The runner will appear in the Runners tab once registered.
-              You can close this dialog — setup continues in the background.
-            </p>
-          </div>
+        <p className="text-xs text-muted-foreground">
+          Detects OS/arch, downloads the correct GitHub Actions runner binary via SSH, and registers it with GitHub.
+          Requires the machine's SSH user to have <code>sudo</code> access (Linux) or standard access (macOS).
+        </p>
+        <div>
+          <label className="text-xs text-muted-foreground mb-1 block">Machine</label>
+          <select
+            value={machineId}
+            onChange={e => setMachineId(Number(e.target.value))}
+            className="input w-full"
+          >
+            <option value="">Select machine…</option>
+            {machines?.map(m => (
+              <option key={m.id} value={m.id}>{m.name} ({m.host})</option>
+            ))}
+          </select>
+        </div>
+        {setupMut.error && (
+          <p className="text-xs text-destructive">
+            {(setupMut.error as any)?.response?.data?.message ?? 'Setup failed'}
+          </p>
         )}
         <div className="flex gap-2 justify-end">
-          <button className="btn-ghost text-sm" onClick={onClose}>{started ? 'Close' : 'Cancel'}</button>
-          {!started && (
-            <button
-              className="btn-primary text-sm flex items-center gap-1.5"
-              onClick={() => setupMut.mutate()}
-              disabled={setupMut.isPending || !machineId}
-            >
-              {setupMut.isPending && <Loader2 size={12} className="animate-spin" />}
-              <Server size={12} /> Set Up
-            </button>
-          )}
+          <button className="btn-ghost text-sm" onClick={onClose}>Cancel</button>
+          <button
+            className="btn-primary text-sm flex items-center gap-1.5"
+            onClick={() => setupMut.mutate()}
+            disabled={setupMut.isPending || !machineId}
+          >
+            {setupMut.isPending && <Loader2 size={12} className="animate-spin" />}
+            <Server size={12} /> Set Up
+          </button>
         </div>
       </div>
     </div>
