@@ -25,6 +25,7 @@ export interface DeploymentRequest {
   tunnelName?: string
   tunnelHostname?: string
   tunnelAppPort?: number
+  webhookUrl?: string
 }
 
 export const getDeployments = (page = 0, size = 20) =>
