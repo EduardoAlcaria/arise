@@ -56,8 +56,12 @@ services:
       SPRING_RABBITMQ_HOST: rabbitmq
       SPRING_RABBITMQ_USERNAME: automation
       SPRING_RABBITMQ_PASSWORD: automation
-      # Base64-encoded secret — decode: "automationcenter-jwt-secret-key-32+"
-      JWT_SECRET: ${JWT_SECRET:-YXV0b21hdGlvbmNlbnRlci1qd3Qtc2VjcmV0LWtleS0zMis=}
+      # REQUIRED: generate with: openssl rand -base64 32
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set}
+      # REQUIRED: any random string >= 32 chars
+      ENCRYPTION_SECRET: ${ENCRYPTION_SECRET:?ENCRYPTION_SECRET must be set}
+      # Optional: comma-separated allowed origins for CORS (default: localhost dev ports)
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:5173}
     depends_on:
       postgres:
         condition: service_healthy
