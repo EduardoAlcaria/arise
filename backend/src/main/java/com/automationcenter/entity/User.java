@@ -56,6 +56,9 @@ public class User implements UserDetails {
     @Column
     private String infisicalProjectId;
 
+    @Column(unique = true)
+    private String webhookToken;
+
     @CreationTimestamp
     private LocalDateTime createdAt;
 
