@@ -20,7 +20,6 @@ public class SettingsController {
 
     @GetMapping("/webhook-token")
     public ResponseEntity<Map<String, String>> getWebhookToken(@AuthenticationPrincipal User user) {
-        String token = userService.getOrCreateWebhookToken(user.getId());
-        return ResponseEntity.ok(Map.of("webhookToken", token));
+        return ResponseEntity.ok(userService.getOrCreateWebhookCredentials(user.getId()));
     }
 }
