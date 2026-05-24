@@ -41,7 +41,7 @@ public class WebhookController {
             return ResponseEntity.notFound().build();
         }
 
-        if (!verifySignature(webhookToken, body, signature)) {
+        if (user.getWebhookSecret() == null || !verifySignature(user.getWebhookSecret(), body, signature)) {
             log.warn("[Webhook] Invalid signature for user {}", user.getId());
             return ResponseEntity.status(401).build();
         }
