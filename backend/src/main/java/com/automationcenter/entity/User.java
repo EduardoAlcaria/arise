@@ -59,6 +59,9 @@ public class User implements UserDetails {
     @Column(unique = true)
     private String webhookToken;
 
+    @Column(unique = true)
+    private String webhookSecret;
+
     @CreationTimestamp
     private LocalDateTime createdAt;
 
