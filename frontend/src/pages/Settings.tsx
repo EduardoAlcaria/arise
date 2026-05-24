@@ -104,28 +104,39 @@ export default function Settings() {
           </div>
           <div className="px-5 py-5 flex flex-col gap-3">
             <p className="text-xs text-muted-foreground leading-relaxed">
-              Add this URL to your GitHub repository (Settings → Webhooks). Set content type to{' '}
-              <code className="font-mono text-[10px] bg-muted px-1 py-0.5 rounded">application/json</code> and use your webhook token as the secret.
-              Pushes to a tracked branch will trigger an automatic redeploy.
+              Add to your GitHub repository under Settings → Webhooks. Set content type to{' '}
+              <code className="font-mono text-[10px] bg-muted px-1 py-0.5 rounded">application/json</code>.
+              Pushes to a tracked branch trigger an automatic redeploy.
             </p>
-            <div className="flex items-center gap-2">
-              <input
-                readOnly
-                className="input-field mono flex-1 text-xs"
-                value={webhookUrl || 'Loading…'}
-              />
-              <button
-                onClick={copyWebhookUrl}
-                disabled={!webhookUrl}
-                className="flex items-center gap-1.5 px-3 py-2 border border-border text-xs font-medium rounded-lg hover:bg-muted transition-colors shrink-0 disabled:opacity-50"
-              >
-                {webhookCopied ? <><Check size={12} />Copied</> : <><Copy size={12} />Copy</>}
-              </button>
+            <div>
+              <label className="block text-[11px] font-semibold text-muted-foreground mb-1.5 uppercase tracking-widest">Payload URL</label>
+              <div className="flex items-center gap-2">
+                <input
+                  readOnly
+                  className="input-field mono flex-1 text-xs"
+                  value={webhookUrl || 'Loading…'}
+                />
+                <button
+                  onClick={copyWebhookUrl}
+                  disabled={!webhookUrl}
+                  className="flex items-center gap-1.5 px-3 py-2 border border-border text-xs font-medium rounded-lg hover:bg-muted transition-colors shrink-0 disabled:opacity-50"
+                >
+                  {webhookCopied ? <><Check size={12} />Copied</> : <><Copy size={12} />Copy</>}
+                </button>
+              </div>
             </div>
             {webhookData && (
-              <p className="text-[11px] text-muted-foreground/60">
-                Secret / HMAC key: <code className="font-mono">{webhookData.webhookToken}</code>
-              </p>
+              <div>
+                <label className="block text-[11px] font-semibold text-muted-foreground mb-1.5 uppercase tracking-widest">Secret (HMAC key)</label>
+                <input
+                  readOnly
+                  className="input-field mono flex-1 text-xs w-full"
+                  value={webhookData.webhookSecret}
+                />
+                <p className="text-[11px] text-muted-foreground/60 mt-1">
+                  Paste this into the GitHub webhook "Secret" field. It is different from the URL token.
+                </p>
+              </div>
             )}
           </div>
         </div>
