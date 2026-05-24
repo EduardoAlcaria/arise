@@ -139,13 +139,13 @@ public class DeploymentService {
 
             // Clone — rm on Unix, rmdir on Windows
             String cloneCmd = isWindows
-                    ? "rmdir /s /q \"" + repoDir + "\" 2>nul & git clone " + cloneUrl + " -b " + deployment.getBranch() + " \"" + repoDir + "\""
-                    : "rm -rf " + repoDir + " && git clone " + cloneUrl + " -b " + deployment.getBranch() + " " + repoDir;
+                    ? "rmdir /s /q \"" + repoDir + "\" 2>nul & git clone " + cloneUrl + " -b \"" + deployment.getBranch().replace("\"", "") + "\" \"" + repoDir + "\""
+                    : "rm -rf " + repoDir + " && git clone " + sq(cloneUrl) + " -b " + sq(deployment.getBranch()) + " " + repoDir;
             appendLog(deployment, "Cloning repository: " + deployment.getRepositoryUrl(), LogLevel.INFO);
             var cloneResult = sshService.execute(machine, cloneCmd);
-            appendLog(deployment, cloneResult.getStdout(), LogLevel.INFO);
+            appendLog(deployment, sanitizeGitOutput(cloneResult.getStdout()), LogLevel.INFO);
             if (cloneResult.getExitCode() != 0) {
-                appendLog(deployment, "Clone failed: " + cloneResult.getStderr(), LogLevel.ERROR);
+                appendLog(deployment, "Clone failed: " + sanitizeGitOutput(cloneResult.getStderr()), LogLevel.ERROR);
                 fail(deployment);
                 return;
             }
@@ -272,19 +272,20 @@ public class DeploymentService {
             deploymentRepository.save(deployment);
 
             for (AppServiceDto service : services) {
-                String serviceDir = baseDir + "/" + service.getName();
+                String safeName = service.getName().replaceAll("[^a-zA-Z0-9_-]", "_");
+                String serviceDir = baseDir + "/" + safeName;
                 String repoUrl = service.getRepoUrl();
                 if (ownerGithubToken != null && !ownerGithubToken.isBlank()
                         && repoUrl != null && repoUrl.startsWith("https://github.com/")) {
                     repoUrl = repoUrl.replace("https://github.com/", "https://" + ownerGithubToken + "@github.com/");
                 }
                 String branch = service.getBranch() != null ? service.getBranch() : "main";
-                String cloneCmd = "rm -rf " + serviceDir + " && git clone " + repoUrl + " -b " + branch + " " + serviceDir;
-                appendLog(deployment, "Cloning service " + service.getName(), LogLevel.INFO);
+                String cloneCmd = "rm -rf " + sq(serviceDir) + " && git clone " + sq(repoUrl) + " -b " + sq(branch) + " " + sq(serviceDir);
+                appendLog(deployment, "Cloning service " + safeName, LogLevel.INFO);
                 var cloneResult = sshService.execute(machine, cloneCmd);
-                appendLog(deployment, cloneResult.getStdout(), LogLevel.INFO);
+                appendLog(deployment, sanitizeGitOutput(cloneResult.getStdout()), LogLevel.INFO);
                 if (cloneResult.getExitCode() != 0) {
-                    appendLog(deployment, "Clone failed for " + service.getName() + ": " + cloneResult.getStderr(), LogLevel.ERROR);
+                    appendLog(deployment, "Clone failed for " + safeName + ": " + sanitizeGitOutput(cloneResult.getStderr()), LogLevel.ERROR);
                     fail(deployment);
                     return;
                 }
@@ -549,6 +550,17 @@ public class DeploymentService {
         if (files.contains("build.gradle")) return "gradle";
         if (files.contains("requirements.txt") || files.contains("pyproject.toml")) return "python";
         return "unknown";
+    }
+
+    /** Single-quote a string for safe use in Unix shell commands. */
+    private static String sq(String s) {
+        return "'" + (s == null ? "" : s).replace("'", "'\\''") + "'";
+    }
+
+    /** Strip embedded GitHub tokens from git output before logging. */
+    private static String sanitizeGitOutput(String s) {
+        if (s == null) return "";
+        return s.replaceAll("https://[^@]+@github\\.com/", "https://github.com/");
     }
 
     private String getBuildCommand(String stack, String repoDir, boolean isWindows) {
