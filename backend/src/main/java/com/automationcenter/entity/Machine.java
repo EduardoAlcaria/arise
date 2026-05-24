@@ -27,6 +27,7 @@ public class Machine {
     @Column(nullable = false)
     private String sshUser;
 
+    @Convert(converter = com.automationcenter.converter.AesGcmConverter.class)
     @Column(columnDefinition = "TEXT", nullable = false)
     private String privateKey;
 
