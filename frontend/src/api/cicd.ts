@@ -56,7 +56,12 @@ export const triggerByPush = (owner: string, repo: string, ref: string) =>
   client.post(`/cicd/push/${owner}/${repo}`, null, { params: { ref } })
 
 export const setupRunner = (owner: string, repo: string, machineId: number) =>
-  client.post(`/cicd/runner/${owner}/${repo}/setup`, null, { params: { machineId } })
+  client.post<{ sessionId: string }>(`/cicd/runner/${owner}/${repo}/setup`, null, { params: { machineId } })
+    .then(r => r.data)
+
+export const getRunnerSession = (sessionId: string) =>
+  client.get<{ status: string; output: string }>(`/cicd/runner/session/${sessionId}`)
+    .then(r => r.data)
 
 export const listAllRunners = () =>
   client.get<Runner[]>('/cicd/runners').then(r => r.data)
