@@ -193,8 +193,27 @@ public class DeploymentService {
                 }
             }
 
-            // Detect stack
-            String stack = detectStack(machine, repoDir, isWindows);
+            // Read .arise.yml for deployment hints (compose file override)
+            String ariseComposeFile = null;
+            if (!isWindows) {
+                var ariseYml = sshService.execute(machine, "cat " + repoDir + "/.arise.yml 2>/dev/null || true");
+                if (ariseYml.getExitCode() == 0 && !ariseYml.getStdout().isBlank()) {
+                    try {
+                        org.yaml.snakeyaml.Yaml yaml = new org.yaml.snakeyaml.Yaml();
+                        @SuppressWarnings("unchecked")
+                        var ariseData = (java.util.Map<String, Object>) yaml.load(ariseYml.getStdout());
+                        if (ariseData != null && ariseData.get("compose") instanceof String cf) {
+                            ariseComposeFile = cf;
+                            appendLog(deployment, "Using compose file from .arise.yml: " + ariseComposeFile, LogLevel.INFO);
+                        }
+                    } catch (Exception e) {
+                        appendLog(deployment, "Could not parse .arise.yml: " + e.getMessage(), LogLevel.WARN);
+                    }
+                }
+            }
+
+            // Detect stack — arise.yml compose hint overrides file-based detection
+            String stack = ariseComposeFile != null ? "compose" : detectStack(machine, repoDir, isWindows);
             deployment.setDetectedStack(stack);
             appendLog(deployment, "Detected stack: " + stack, LogLevel.INFO);
 
@@ -213,7 +232,7 @@ public class DeploymentService {
             }
 
             // Stack-specific build step
-            String buildCmd = getBuildCommand(stack, repoDir, isWindows);
+            String buildCmd = getBuildCommand(stack, repoDir, isWindows, ariseComposeFile);
             if (!buildCmd.isEmpty()) {
                 appendLog(deployment, "Running build: " + buildCmd, LogLevel.INFO);
                 var buildResult = sshService.execute(machine, buildCmd);
@@ -226,7 +245,8 @@ public class DeploymentService {
             }
 
             if ("compose".equals(stack) && !isWindows) {
-                var psResult = sshService.execute(machine, "cd " + repoDir + " && docker compose ps 2>&1");
+                String composeFileFlag = ariseComposeFile != null ? " -f " + sq(ariseComposeFile) : "";
+                var psResult = sshService.execute(machine, "cd " + repoDir + " && docker compose" + composeFileFlag + " ps 2>&1");
                 appendLog(deployment, "--- Container status ---\n" + psResult.getStdout(), LogLevel.INFO);
             }
 
@@ -819,10 +839,11 @@ public class DeploymentService {
         return s.replaceAll("https://[^@]+@github\\.com/", "https://github.com/");
     }
 
-    private String getBuildCommand(String stack, String repoDir, boolean isWindows) {
+    private String getBuildCommand(String stack, String repoDir, boolean isWindows, String composeFile) {
         String cd = isWindows ? "cd /d \"" + repoDir + "\" && " : "cd " + repoDir + " && ";
+        String composeFlag = composeFile != null ? "-f " + sq(composeFile) + " " : "";
         return switch (stack) {
-            case "compose" -> cd + "docker compose up --build -d 2>&1";
+            case "compose" -> cd + "docker compose " + composeFlag + "up --build -d 2>&1";
             case "docker" -> cd + "docker build -t app_" + System.currentTimeMillis() + " .";
             case "node"   -> cd + "npm ci && npm run build";
             case "maven"  -> cd + "mvn clean package -DskipTests";
