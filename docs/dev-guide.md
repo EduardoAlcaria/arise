@@ -67,13 +67,13 @@ All entities have an `owner` (`@ManyToOne User`) — data is always filtered by 
 
 | Entity | Table | Key fields |
 |---|---|---|
-| `User` | `users` | `email`, `password` (BCrypt), `name`, `role`, `githubToken`, `cloudflareToken`, `cloudflareAccountId`, `infisicalClientId/Secret/BaseUrl/ProjectId` |
-| `Machine` | `machines` | `name`, `host`, `port`, `sshUser`, `privateKey` (plain text — stored as TEXT), `tunnelType` (DIRECT/CLOUDFLARE_TCP/PROXY_COMMAND), `proxyCommand`, `status` |
-| `Deployment` | `deployments` | `name`, `type` (REPOSITORY/CONTAINER/APPLICATION), `status`, `repositoryUrl`, `branch`, `detectedStack`, `deployDir`, `resolvedCommitSha`, `cloudfareTunnelId/Url`, `tunnelName/Hostname/AppPort`, `applicationServices/Configs/repoConfigs` (JSON blobs) |
+| `User` | `users` | `email`, `password` (BCrypt), `name`, `role`, `githubToken` (encrypted), `cloudflareToken` (encrypted), `cloudflareAccountId`, `infisicalClientId` (encrypted), `infisicalClientSecret` (encrypted), `infisicalBaseUrl`, `infisicalProjectId` |
+| `Machine` | `machines` | `name`, `host`, `port`, `sshUser`, `privateKey` (AES-256-GCM encrypted), `tunnelType` (DIRECT/CLOUDFLARE_TCP/PROXY_COMMAND), `proxyCommand`, `status` |
+| `Deployment` | `deployments` | `name`, `type` (REPOSITORY/CONTAINER/APPLICATION), `status`, `repositoryUrl`, `branch`, `detectedStack`, `deployDir`, `resolvedCommitSha`, `cloudfareTunnelId/Url`, `tunnelName/Hostname/AppPort`, `webhookUrl`, `applicationServices/Configs/repoConfigs` (JSON blobs) |
 | `ContainerDeployment` | `container_deployments` | `name`, `image`, `hostPort`, `containerPort`, `envVars` (element collection), `containerId`, `status` |
 | `LogEntry` | `log_entries` | `deploymentId`, `message`, `level`, `createdAt` |
 
-**Security note:** SSH private keys and API tokens are stored in plaintext in the DB. This is a known shortcoming — Infisical integration exists but injection isn't wired to key storage yet.
+**Encryption:** `Machine.privateKey`, `User.githubToken`, `User.cloudflareToken`, `User.infisicalClientId`, `User.infisicalClientSecret` are encrypted at rest using AES-256-GCM via `AesGcmConverter` (a JPA `AttributeConverter`). The secret is configured in `application.properties` as `encryption.secret` (must be ≥ 32 chars). The converter is applied with `@Convert(converter = AesGcmConverter.class)` on each field.
 
 ### 4.2 Repositories
 
@@ -98,15 +98,15 @@ Business rules live exclusively in services. Controllers are thin wrappers.
 |---|---|
 | `AuthService` | Register (unique email), login, issue JWT |
 | `MachineService` | CRUD for machines, test SSH ping, `@Scheduled` health check every 5 min |
-| `SshService` | Execute a shell command via SSH (`execute`), write a file via base64 shell pipe (`writeFileViaShell`). Handles DIRECT/CLOUDFLARE_TCP/PROXY_COMMAND tunnel modes. |
-| `DeploymentService` | Create deployment (publishes to `deployment.run.queue` via `afterCommit`), `executeAsync` (called by listener), rollback, redeploy, delete, add/remove tunnel |
+| `SshService` | Execute a shell command via SSH (`execute`), write a file via base64 shell pipe (`writeFileViaShell`). Handles DIRECT/CLOUDFLARE_TCP/PROXY_COMMAND tunnel modes. Prepends `/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin` to PATH on every command so macOS Homebrew tools are found (JSch ChannelExec skips shell profile). |
+| `DeploymentService` | Create deployment (publishes to `deployment.run.queue` via `afterCommit`), `executeAsync` (called by listener), rollback, redeploy, delete, add/remove tunnel. Tears down previous deployment before redeploying. |
 | `ContainerDeploymentService` | Deploy a Docker image on a machine via SSH (docker run) |
 | `LogService` | Append log entry to DB + broadcast via `LogBroadcaster` |
 | `LogBroadcaster` | SSE pub/sub — holds `ConcurrentHashMap<deploymentId, Set<SseEmitter>>`. `publish()` fans out to all connected clients. `complete()` signals stream end. |
 | `GitHubService` | List repos (ISO-8601 dates for correct sort), branches, file tree, README (WebClient), file content, env var keys, runner registration token. |
 | `CloudflareService` | Save/validate token, list zones, create/configure/delete tunnel, get tunnel token, create DNS CNAME |
 | `InfisicalService` | Save credentials, authenticate (get bearer token), list/get secrets |
-| `CicdService` | detectWorkflows, getWorkflowRuns, rerunWorkflow, triggerWorkflow, getWorkflowJobs, listRunners (per-repo), listAllRunners (aggregated across all repos via parallelStream), deleteRunner, setupRunner (async, SSH) |
+| `CicdService` | detectWorkflows, getWorkflowRuns (returns `workflowName`, `displayTitle`, `headSha`, `htmlUrl`), rerunWorkflow, triggerWorkflow, getWorkflowJobs, listRunners (per-repo), listAllRunners (aggregated across all repos via parallelStream), deleteRunner, setupRunner (async, SSH) |
 | `TopologyService` | Build graph of machines → deployments → tunnels + containers from DB |
 | `DockerService` | Docker container lifecycle (stop/start/remove/logs) via SSH |
 
@@ -305,23 +305,26 @@ Every service method that queries data takes `ownerId` as a parameter and passes
    - Sets status to `BUILDING`
    - Detects OS on remote machine (`uname -s`)
    - Injects GitHub token into clone URL for auth
-   - Clones repo via SSH, writes config files if any
-   - Detects stack (checks for `docker-compose.yml`, `package.json`, `requirements.txt`, etc.)
-   - Runs build command (`docker compose up -d --build` for compose, `npm run build` for Node, etc.)
+   - **REPOSITORY type:** Clones repo to `/tmp/deploy_{id}/`. Writes any `repoConfigs` (config files) to the deploy dir before stack detection. Saves `deployDir` on the entity. Tears down the previous successful deployment for the same repo+machine before starting. Detects stack (`compose` / `node` / `maven` / `python` / `static`). Runs stack build command.
+   - **APPLICATION type:** Resolves remote `$HOME` via SSH (`echo $HOME`). Clones each service repo to `~/arise-apps/{deploymentId}/{serviceName}/`. Writes config files (scoped by service subfolder prefix). Tears down previous APPLICATION deployment on same machine. Runs `docker compose up --build -d` from `baseDir`.
    - Optionally creates Cloudflare tunnel
    - Sets status to `SUCCESS` or `FAILED`
    - Publishes `"DEPLOYMENT_SUCCESS:id"` or `"DEPLOYMENT_FAILED:id"` to `deployment.exchange`
 3. `DeploymentEventListener.onDeploymentEvent()` receives the event:
    - Broadcasts `{"type":"DEPLOYMENT_UPDATE","deploymentId":N,"status":"SUCCESS"}` via `/ws/notifications` WebSocket to all connected browser tabs
-   - On SUCCESS: also publishes to `hooks.queue` for post-deploy processing
+   - On SUCCESS: publishes to `hooks.queue` → `PostDeployHookListener` makes HTTP POST to `deployment.webhookUrl` if set
 4. Frontend streams logs live via SSE (`GET /api/deployments/{id}/logs/stream`) through `DeploymentWatcher.tsx`
 5. On completion, the WS push invalidates `['deployments-all']` — deployment list refreshes automatically
 
 **Race condition prevention:** The `afterCommit()` hook guarantees the deployment row is committed to DB before the RabbitMQ message fires, so the listener can always find the record via `findById`.
 
+**Teardown before redeploy:** `teardownPreviousDeployment()` looks up the most recent `SUCCESS` deployment for the same `repositoryUrl + machineId + type` (or same `machineId + type` for APPLICATION), runs `docker compose down --remove-orphans` in its `deployDir`. This prevents port conflicts when redeploying. Non-fatal — teardown failure logs a WARN and continues.
+
+**Config file injection:** Both REPOSITORY and APPLICATION deployments accept a `repoConfigs` / `configFiles` array of `{path, content}`. Files are written via `SshService.writeFileViaShell()` (base64-encode → `printf | base64 -d > path` on remote). For REPOSITORY, files are written relative to the clone dir. For APPLICATION, files are matched by service subfolder prefix and written into the correct service dir.
+
 **Rollback:** SSH `docker compose down` in `deployDir` of the old deployment, then `docker compose up -d` in the previous deployment's `deployDir`.
 
-**Redeploy:** Creates a new `Deployment` row (same `repositoryUrl` so it groups in the UI) and runs `executeAsync` again.
+**Redeploy:** Creates a new `Deployment` row (same `repositoryUrl` so it groups in the UI), carries over `repoConfigs` and `webhookUrl` from the source, runs `executeAsync` again.
 
 **Delete:** SSH `docker compose down`, delete Cloudflare tunnel via API, delete all `LogEntry` records, delete `Deployment` row.
 
@@ -342,6 +345,8 @@ Every service method that queries data takes `ownerId` as a parameter and passes
 3. SSHs into the machine and runs the full install script (`curl | tar`, `config.sh`, `svc.sh install && start`)
 
 Runner setup requires the target machine user to have `sudo` without password for the `svc.sh` commands.
+
+**Mac Mini runner (live):** Runner named `Mac-Mini` is registered and running on the Mac Mini for the `arise` repo (labels: `self-hosted, macOS, ARM64, Mac-Mini`). It was installed as a LaunchAgent so it auto-starts on login. GitHub token must have `workflow` scope for runner registration to succeed.
 
 ### 6.6 Cloudflare tunnels
 
@@ -431,13 +436,58 @@ Schema is managed by Hibernate `ddl-auto=update` — it creates/updates tables o
 
 ---
 
-## 10. Known issues / shortcuts
+## 10. Production infrastructure (Mac Mini)
+
+### Connection
+- **Host:** `arise-ssh.alcaria.dev` (Cloudflare Access SSH tunnel)
+- **User:** `mugen`
+- **Tunnel type:** `PROXY_COMMAND` with `cloudflared access ssh --hostname %h`
+- **Machine ID in DB:** 4
+
+### Ports in use on Mac Mini
+| Port | Service |
+|---|---|
+| 80 | caddy / system |
+| 3030 | existing service |
+| 5332, 5432 | postgres instances |
+| 8000, 8080, 9000 | existing services |
+| 11434 | ollama |
+| 4100, 4200 | Absolute app (deployed via arise) |
+| 9999, 9090, 3000 | sixeyes app (deployed via arise) |
+| 9191 | test-inject nginx (can be removed) |
+
+### Live deployments
+| Deployment | Type | Repo | Deploy dir |
+|---|---|---|---|
+| Absolute | APPLICATION | EduardoAlcaria/Absolute + EduardoAlcaria/retropilot | `~/arise-apps/16/` |
+| sixeyes | REPOSITORY | EduardoAlcaria/sixeyes | `/tmp/deploy_19/` |
+| test-inject | REPOSITORY | EduardoAlcaria/arise | `/tmp/deploy_23/` (nginx test — can delete) |
+
+### Full deploy flow (end-to-end, no Claude needed)
+1. Open arise UI → Deployments → Deploy
+2. **Single repo:** pick repo → Step 2 fills env vars from `.env.example` → Step 3: select machine, add config files if repo needs an injected `docker-compose.yml` or Dockerfile, set webhook URL → Deploy
+3. **Application (multi-repo):** pick repos → assign subfolder names → Step 3: add config files (shared compose that references all services), select machine → Deploy Application
+4. Arise clones repos, writes injected files, runs `docker compose up --build -d`, streams logs
+5. On SUCCESS: post-deploy webhook fires (if `webhookUrl` set), WS notification refreshes UI
+
+### Config file injection
+Use when a repo has a broken/missing Dockerfile or docker-compose. In the wizard Step 3, use **Add file** to inject any file by path (relative to clone dir). Content is base64-encoded and written via SSH before stack detection. Common use cases:
+- Inject `docker-compose.yml` for repos that have none
+- Override a broken `Dockerfile` with a fixed version (e.g. add `build-essential` for Python C extensions)
+- Inject `nginx/nginx.conf` for frontend services
+
+---
+
+## 11. Known issues / shortcuts
 
 | Issue | Detail |
 |---|---|
-| Tokens stored plaintext | `githubToken`, `cloudflareToken`, `privateKey` are plain text in DB. Infisical integration exists but key/token storage isn't encrypted through it yet. |
 | No tests | Zero unit or integration tests currently. |
 | CORS hardcoded | `SecurityConfig` allows only `localhost:3000` and `localhost:5173`. Production deployments need this updated. |
-| Post-deploy webhooks not wired | `PostDeployHookListener` logs a placeholder — no real HTTP call to a webhook URL yet. |
 | Runner setup is fire-and-forget | `setupRunner` returns 202 immediately; there's no way to see the SSH output from the UI. |
 | Deployment type APPLICATION | Multi-repo application deploys store services/configs as JSON blobs in `applicationServices` and `applicationConfigs` columns. |
+| `~/arise-apps/{id}` not cleaned up | APPLICATION deployment directories on remote machines accumulate — deleting a deployment doesn't SSH to clean the folder. |
+| No post-deploy health check | After `docker compose up`, arise doesn't verify containers stay up. Deployment is marked SUCCESS if the compose command exits 0, regardless of container health. |
+| Deployment monitoring screen | Log stream UI needs a full redesign — planned but not yet done. |
+| Config file injection UX | Single-mode wizard Step 3 config files section works but UX is rough — noted for polish pass. |
+| WebClient buffer | Raised to 10MB (`WebClientConfig`). If a GitHub API response exceeds 10MB (very large repos with 1000s of workflow runs), it will still fail. |
