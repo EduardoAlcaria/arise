@@ -1,5 +1,6 @@
 package com.automationcenter.controller;
 
+import com.automationcenter.dto.github.AriseConfig;
 import com.automationcenter.dto.github.GitHubBranchResponse;
 import com.automationcenter.dto.github.GitHubRepoResponse;
 import com.automationcenter.dto.github.GitHubTokenRequest;
@@ -86,6 +87,16 @@ public class GitHubController {
             @AuthenticationPrincipal User user) {
         List<String> vars = gitHubService.getEnvVarKeys(user.getId(), owner, repo, branch);
         return ResponseEntity.ok(Map.of("vars", vars));
+    }
+
+    @GetMapping("/repos/{owner}/{repo}/arise-config")
+    public ResponseEntity<AriseConfig> getAriseConfig(
+            @PathVariable String owner,
+            @PathVariable String repo,
+            @RequestParam(defaultValue = "main") String branch,
+            @AuthenticationPrincipal User user) {
+        AriseConfig config = gitHubService.getAriseConfig(user.getId(), owner, repo, branch);
+        return config != null ? ResponseEntity.ok(config) : ResponseEntity.noContent().build();
     }
 
     @PostMapping("/repos/{owner}/{repo}/runner-token")
