@@ -5,8 +5,8 @@ services:
     image: postgres:16
     environment:
       POSTGRES_DB: automation_db
-      POSTGRES_USER: automation_user
-      POSTGRES_PASSWORD: automation_pass
+      POSTGRES_USER: ${POSTGRES_USER:-automation_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
     ports:
       - "5432:5432"
     volumes:
@@ -32,8 +32,8 @@ services:
   rabbitmq:
     image: rabbitmq:3.13-management
     environment:
-      RABBITMQ_DEFAULT_USER: automation
-      RABBITMQ_DEFAULT_PASS: automation
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-automation}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD must be set}
     ports:
       - "5672:5672"
       - "15672:15672"
@@ -50,12 +50,12 @@ services:
       - "8080:8080"
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/automation_db
-      SPRING_DATASOURCE_USERNAME: automation_user
-      SPRING_DATASOURCE_PASSWORD: automation_pass
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-automation_user}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
       SPRING_DATA_REDIS_HOST: redis
       SPRING_RABBITMQ_HOST: rabbitmq
-      SPRING_RABBITMQ_USERNAME: automation
-      SPRING_RABBITMQ_PASSWORD: automation
+      SPRING_RABBITMQ_USERNAME: ${RABBITMQ_USER:-automation}
+      SPRING_RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
       # REQUIRED: generate with: openssl rand -base64 32
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set}
       # REQUIRED: any random string >= 32 chars
