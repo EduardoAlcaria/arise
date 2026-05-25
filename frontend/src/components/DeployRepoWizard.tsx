@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { X, Eye, EyeOff, Search, GitBranch, Loader2, ChevronRight, ChevronLeft, Check, AlertTriangle, Lock, Rocket, Plus, Trash2, Layers, FolderOpen, KeyRound, Database, Cloud } from 'lucide-react'
-import { saveGitHubToken, getRepos, getBranches, getRepoEnvVars } from '../api/github'
+import { saveGitHubToken, getRepos, getBranches, getRepoEnvVars, getAriseConfig } from '../api/github'
+import type { AriseConfig } from '../api/github'
 import { getInfisicalStatus, getInfisicalSecrets } from '../api/infisical'
 import { getCloudflareStatus } from '../api/cloudflare'
 import type { AppServiceItem, ConfigFileItem } from '../api/deployments'
@@ -74,6 +75,8 @@ export default function DeployRepoWizard({
   const [tunnelHostname, setTunnelHostname] = useState('')
   const [tunnelAppPort, setTunnelAppPort] = useState(80)
   const [webhookUrl, setWebhookUrl] = useState('')
+
+  const [ariseConfig, setAriseConfig] = useState<AriseConfig | null>(null)
 
   // Env vars state
   const [envVarKeys, setEnvVarKeys] = useState<string[]>([])
@@ -153,6 +156,29 @@ export default function DeployRepoWizard({
     }
   }
 
+  const loadAriseConfigForRepo = async (owner: string, repo: string, branch: string) => {
+    const config = await getAriseConfig(owner, repo, branch)
+    setAriseConfig(config)
+    if (config?.env && config.env.length > 0) {
+      setEnvVarKeys(prev => [...config.env!, ...prev.filter(k => !config.env!.includes(k))])
+      setEnvVars(prev => {
+        const next: Record<string, string> = { ...prev }
+        for (const k of config.env!) { if (!(k in next)) next[k] = '' }
+        return next
+      })
+    }
+    if (config?.name) {
+      setSelections(prev => {
+        const entries = Array.from(prev.entries())
+        if (entries.length === 1) {
+          const [key, sel] = entries[0]
+          setDeployNames(new Map([[key, config.name!]]))
+        }
+        return prev
+      })
+    }
+  }
+
   const validatePat = async () => {
     if (!pat.trim()) return
     setValidating(true); setPatError('')
@@ -177,10 +203,11 @@ export default function DeployRepoWizard({
       const next = new Map(prev)
       if (next.has(repo.fullName)) {
         next.delete(repo.fullName)
-        // Clear env vars if in single mode and no other selection
+        // Clear env vars + arise config if in single mode and no other selection
         if (mode === 'single') {
           setEnvVarKeys([])
           setEnvVars({})
+          setAriseConfig(null)
         }
       } else {
         next.set(repo.fullName, {
@@ -195,10 +222,11 @@ export default function DeployRepoWizard({
             return n
           })
         })
-        // Load env vars for single mode
+        // Load env vars + arise config for single mode
         if (mode === 'single') {
           const [owner] = repo.fullName.split('/')
           loadEnvVarsForRepo(owner, repo.name, repo.defaultBranch)
+          loadAriseConfigForRepo(owner, repo.name, repo.defaultBranch)
         }
       }
       return next
@@ -212,10 +240,11 @@ export default function DeployRepoWizard({
       if (ex) next.set(repoFullName, { ...ex, branch })
       return next
     })
-    // Reload env vars on branch change (single mode)
+    // Reload env vars + arise config on branch change (single mode)
     if (mode === 'single') {
       const parts = repoFullName.split('/')
       loadEnvVarsForRepo(parts[0], parts[1], branch)
+      loadAriseConfigForRepo(parts[0], parts[1], branch)
     }
   }
 
@@ -667,6 +696,23 @@ export default function DeployRepoWizard({
                       </div>
                     ))}
                   </div>
+                </div>
+              )}
+
+              {/* .arise.yml info badges */}
+              {ariseConfig && (ariseConfig.compose || ariseConfig.port != null) && (
+                <div className="mb-3.5 flex items-center gap-2 flex-wrap">
+                  <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">arise.yml</span>
+                  {ariseConfig.compose && (
+                    <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-muted border border-border text-foreground">
+                      compose: {ariseConfig.compose}
+                    </span>
+                  )}
+                  {ariseConfig.port != null && (
+                    <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-muted border border-border text-foreground">
+                      port: {ariseConfig.port}
+                    </span>
+                  )}
                 </div>
               )}
 
