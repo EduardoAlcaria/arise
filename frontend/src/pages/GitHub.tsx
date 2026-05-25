@@ -1,3 +1,4 @@
+import ReactMarkdown from 'react-markdown'
 import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { createDeployment } from '../api/deployments'
@@ -17,61 +18,6 @@ const LANG_COLORS: Record<string, string> = {
   PHP: '#4F5D95', Ruby: '#701516', Kotlin: '#A97BFF', Swift: '#F05138',
 }
 
-function simpleMarkdown(md: string): string {
-  // Process fenced code blocks first to protect their contents
-  const codeBlocks: string[] = []
-  let result = md.replace(/```[\w]*\n?([\s\S]*?)```/g, (_match, code: string) => {
-    const idx = codeBlocks.length
-    codeBlocks.push(`<pre class="bg-muted rounded p-3 overflow-x-auto my-2"><code>${code.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</code></pre>`)
-    return `\x00CODE${idx}\x00`
-  })
-
-  // Escape HTML in the non-code portions
-  result = result.replace(/&(?!amp;|lt;|gt;|quot;|#)/g, '&amp;')
-
-  // Headings
-  result = result.replace(/^#### (.+)$/gm, '<h4 class="text-sm font-semibold mt-3 mb-1">$1</h4>')
-  result = result.replace(/^### (.+)$/gm, '<h3 class="text-base font-semibold mt-4 mb-1">$1</h3>')
-  result = result.replace(/^## (.+)$/gm, '<h2 class="text-lg font-bold mt-5 mb-2 border-b border-border pb-1">$1</h2>')
-  result = result.replace(/^# (.+)$/gm, '<h1 class="text-xl font-bold mt-5 mb-3 border-b border-border pb-2">$1</h1>')
-
-  // Horizontal rule
-  result = result.replace(/^---+$/gm, '<hr class="border-border my-4" />')
-
-  // Block quotes
-  result = result.replace(/^> (.+)$/gm, '<blockquote class="border-l-4 border-muted-foreground/30 pl-3 italic text-muted-foreground my-2">$1</blockquote>')
-
-  // Images (before links)
-  result = result.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" class="max-w-full rounded my-2" />')
-
-  // Links
-  result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer" class="text-primary underline underline-offset-2 hover:opacity-80">$1</a>')
-
-  // Bold and italic
-  result = result.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>')
-  result = result.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-  result = result.replace(/__(.+?)__/g, '<strong>$1</strong>')
-  result = result.replace(/\*([^*\n]+?)\*/g, '<em>$1</em>')
-  result = result.replace(/_([^_\n]+?)_/g, '<em>$1</em>')
-
-  // Inline code
-  result = result.replace(/`([^`]+)`/g, '<code class="bg-muted rounded px-1 text-[0.85em]">$1</code>')
-
-  // Unordered lists — collect consecutive lines
-  result = result.replace(/^[ \t]*[-*+] (.+)$/gm, '<li class="ml-4 list-disc">$1</li>')
-  result = result.replace(/(<li[^>]*>.*<\/li>\n?)+/g, (m) => `<ul class="my-2 space-y-0.5">${m}</ul>`)
-
-  // Ordered lists
-  result = result.replace(/^[ \t]*\d+\. (.+)$/gm, '<li class="ml-4 list-decimal">$1</li>')
-
-  // Paragraphs — lines not already wrapped in HTML tags
-  result = result.replace(/^(?!<[a-z]|[ \t]*$|\x00CODE)(.+)$/gm, '<p class="my-1 leading-relaxed">$1</p>')
-
-  // Restore code blocks
-  result = result.replace(/\x00CODE(\d+)\x00/g, (_m, i: string) => codeBlocks[parseInt(i)])
-
-  return result
-}
 
 function timeAgo(dateStr: string | null): string {
   if (!dateStr) return '—'
@@ -286,11 +232,28 @@ function RepoPanel({ repo, onClose, onDeploy }: RepoPanelProps) {
                 ))}
               </div>
             ) : readmeData?.content ? (
-              <div
-                className="prose prose-sm prose-invert text-sm text-foreground leading-relaxed"
-                style={{ maxWidth: '100%' }}
-                dangerouslySetInnerHTML={{ __html: simpleMarkdown(readmeData.content) }}
-              />
+              <div className="prose prose-sm prose-invert text-sm text-foreground leading-relaxed" style={{ maxWidth: '100%' }}>
+                <ReactMarkdown
+                  components={{
+                    a: ({ href, children }) => <a href={href} target="_blank" rel="noopener noreferrer" className="text-primary underline underline-offset-2 hover:opacity-80">{children}</a>,
+                    code: ({ children, className }) => className
+                      ? <pre className="bg-muted rounded p-3 overflow-x-auto my-2"><code>{children}</code></pre>
+                      : <code className="bg-muted rounded px-1 text-[0.85em]">{children}</code>,
+                    h1: ({ children }) => <h1 className="text-xl font-bold mt-5 mb-3 border-b border-border pb-2">{children}</h1>,
+                    h2: ({ children }) => <h2 className="text-lg font-bold mt-5 mb-2 border-b border-border pb-1">{children}</h2>,
+                    h3: ({ children }) => <h3 className="text-base font-semibold mt-4 mb-1">{children}</h3>,
+                    h4: ({ children }) => <h4 className="text-sm font-semibold mt-3 mb-1">{children}</h4>,
+                    blockquote: ({ children }) => <blockquote className="border-l-4 border-muted-foreground/30 pl-3 italic text-muted-foreground my-2">{children}</blockquote>,
+                    ul: ({ children }) => <ul className="my-2 space-y-0.5 list-disc ml-4">{children}</ul>,
+                    ol: ({ children }) => <ol className="my-2 space-y-0.5 list-decimal ml-4">{children}</ol>,
+                    hr: () => <hr className="border-border my-4" />,
+                    img: ({ src, alt }) => <img src={src} alt={alt} className="max-w-full rounded my-2" />,
+                    p: ({ children }) => <p className="my-1 leading-relaxed">{children}</p>,
+                  }}
+                >
+                  {readmeData.content}
+                </ReactMarkdown>
+              </div>
             ) : (
               <div className="flex flex-col items-center justify-center py-16 text-muted-foreground gap-2">
                 <FileText size={28} className="opacity-30" />
