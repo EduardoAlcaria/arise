@@ -244,13 +244,14 @@ export default function DeployRepoWizard({
       const tunnelFields = tunnelEnabled && tunnelName.trim() && tunnelHostname.trim()
         ? { tunnelName: tunnelName.trim(), tunnelHostname: tunnelHostname.trim(), tunnelAppPort }
         : {}
+      const allConfigs = [...(envFile ? [envFile] : []), ...configFiles]
       const items: DeployItem[] = Array.from(selections.values()).map(sel => ({
         repoUrl: sel.repo.url,
         branch: sel.branch,
         name: deployNames.get(sel.repo.fullName) || sel.repo.name,
         machineId,
         ...tunnelFields,
-        configFiles: envFile ? [envFile] : undefined,
+        configFiles: allConfigs.length > 0 ? allConfigs : undefined,
         webhookUrl: webhookUrl.trim() || undefined,
       }))
       try { await onDeploy(items) } catch (e: any) { setDeployError(e.message || 'Deployment failed') }
@@ -325,7 +326,7 @@ export default function DeployRepoWizard({
 
   const filteredRepos = repos.filter(r => r.fullName.toLowerCase().includes(repoSearch.toLowerCase()))
 
-  const modalWidth = step === 2 ? 580 : mode === 'application' ? 600 : 480
+  const modalWidth = step === 2 ? 580 : mode === 'application' ? 600 : 560
 
   return (
     <div onClick={onCancel} className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
@@ -668,6 +669,74 @@ export default function DeployRepoWizard({
                   </div>
                 </div>
               )}
+
+              {/* Config files (single mode) */}
+              <div className="mb-3.5">
+                <input
+                  ref={folderInputRef}
+                  type="file"
+                  // @ts-expect-error webkitdirectory not in types
+                  webkitdirectory=""
+                  multiple
+                  className="hidden"
+                  onChange={handleFolderUpload}
+                />
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-[11px] font-semibold text-muted-foreground uppercase tracking-widest">
+                    Config files <span className="font-normal normal-case">(optional)</span>
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => folderInputRef.current?.click()}
+                      className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors font-medium"
+                    >
+                      <FolderOpen size={11} /> Upload folder
+                    </button>
+                    <span className="text-muted-foreground/40 text-[11px]">|</span>
+                    <button
+                      onClick={addConfigFile}
+                      className="flex items-center gap-1 text-[11px] text-primary hover:opacity-80 transition-opacity font-medium"
+                    >
+                      <Plus size={11} /> Add file
+                    </button>
+                  </div>
+                </div>
+                {configFiles.length === 0 ? (
+                  <div className="text-[11px] text-muted-foreground py-3 px-3 bg-muted/20 border border-dashed border-border rounded-lg text-center">
+                    <button onClick={() => folderInputRef.current?.click()} className="text-foreground hover:underline font-medium">Upload a folder</button>
+                    {' '}or{' '}
+                    <button onClick={addConfigFile} className="text-primary hover:underline">add files manually</button>
+                    <p className="mt-1 opacity-60">Injected before deploy — e.g. docker-compose.yml, Dockerfile</p>
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-3">
+                    {configFiles.map((cf, i) => (
+                      <div key={i} className="border border-border rounded-lg p-3 bg-muted/10">
+                        <div className="flex items-center gap-2 mb-2">
+                          <input
+                            className="input-field mono flex-1"
+                            style={{ paddingTop: '5px', paddingBottom: '5px', fontSize: '12px' }}
+                            placeholder="docker-compose.yml"
+                            value={cf.path}
+                            onChange={e => updateConfigFile(i, 'path', e.target.value)}
+                          />
+                          <button onClick={() => removeConfigFile(i)}
+                            className="text-muted-foreground hover:text-destructive transition-colors shrink-0">
+                            <Trash2 size={12} />
+                          </button>
+                        </div>
+                        <textarea
+                          className="input-field mono w-full"
+                          style={{ fontSize: '11px', lineHeight: '1.5', resize: 'vertical', minHeight: '80px' }}
+                          placeholder="# file content"
+                          value={cf.content}
+                          onChange={e => updateConfigFile(i, 'content', e.target.value)}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
 
               {/* Tunnel section (single mode) */}
               <div>
