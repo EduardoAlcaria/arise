@@ -43,14 +43,16 @@ public class CicdController {
             @PathVariable String repo,
             @RequestParam Long machineId,
             @AuthenticationPrincipal User user) {
-        String sessionId = runnerSetupTracker.create();
+        String sessionId = runnerSetupTracker.create(user.getId());
         cicdService.setupRunner(user.getId(), machineId, owner, repo, sessionId);
         return ResponseEntity.accepted().body(Map.of("sessionId", sessionId));
     }
 
     @GetMapping("/runner/session/{sessionId}")
-    public ResponseEntity<Map<String, String>> getRunnerSession(@PathVariable String sessionId) {
-        var session = runnerSetupTracker.get(sessionId);
+    public ResponseEntity<Map<String, String>> getRunnerSession(
+            @PathVariable String sessionId,
+            @AuthenticationPrincipal User user) {
+        var session = runnerSetupTracker.get(sessionId, user.getId());
         if (session == null) return ResponseEntity.notFound().build();
         return ResponseEntity.ok(Map.of("status", session.status(), "output", session.output()));
     }
