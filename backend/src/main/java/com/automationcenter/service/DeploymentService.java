@@ -118,6 +118,13 @@ public class DeploymentService {
                 return;
             }
 
+            // Pre-flight: verify git is available before attempting clone
+            if (!commandExists(machine, "git")) {
+                appendLog(deployment, "Pre-flight failed: 'git' is not installed on the target machine. Install git and retry.", LogLevel.ERROR);
+                fail(deployment);
+                return;
+            }
+
             // Detect target OS (Windows cmd.exe won't recognise 'uname')
             var osCheck = sshService.execute(machine, "uname -s 2>/dev/null || echo Windows");
             boolean isWindows = osCheck.getStdout().trim().equalsIgnoreCase("windows")
@@ -188,6 +195,16 @@ public class DeploymentService {
             deployment.setStatus(DeploymentStatus.DEPLOYING);
             deploymentRepository.save(deployment);
 
+            // Pre-flight: check stack-specific dependencies
+            if (!isWindows) {
+                List<String> missingDeps = preflightCheck(machine, stack);
+                if (!missingDeps.isEmpty()) {
+                    appendLog(deployment, "Pre-flight failed: missing dependencies on target machine: " + String.join(", ", missingDeps) + ". Install them and redeploy.", LogLevel.ERROR);
+                    fail(deployment);
+                    return;
+                }
+            }
+
             // Stack-specific build step
             String buildCmd = getBuildCommand(stack, repoDir, isWindows);
             if (!buildCmd.isEmpty()) {
@@ -218,10 +235,7 @@ public class DeploymentService {
                             deployment.getTunnelHostname(), serviceUrl);
                     cloudflareService.createDnsCname(deployment.getOwner().getId(), deployment.getTunnelHostname(), tunnel.getId());
                     String tunnelToken = cloudflareService.getTunnelToken(deployment.getOwner().getId(), tunnel.getId());
-                    String cfCmd = "docker rm -f cloudflared_" + deploymentId + " 2>/dev/null || true" +
-                            " && docker run -d --name cloudflared_" + deploymentId +
-                            " --network host cloudflare/cloudflared:latest tunnel run --token " + tunnelToken;
-                    sshService.execute(machine, cfCmd);
+                    sshService.execute(machine, cloudflaredDockerCmd("cloudflared_" + deploymentId, tunnelToken));
                     deployment.setCloudfareTunnelId(tunnel.getId());
                     deployment.setCloudfareTunnelUrl("https://" + deployment.getTunnelHostname());
                     appendLog(deployment, "Tunnel active: https://" + deployment.getTunnelHostname(), LogLevel.INFO);
@@ -259,6 +273,15 @@ public class DeploymentService {
                     : List.of();
 
             fixDockerCredentials(deployment, machine, false);
+
+            // Pre-flight: application deploys always require git + docker + docker compose
+            List<String> missingDeps = preflightCheck(machine, "compose");
+            if (!commandExists(machine, "git")) missingDeps.add(0, "git");
+            if (!missingDeps.isEmpty()) {
+                appendLog(deployment, "Pre-flight failed: missing dependencies on target machine: " + String.join(", ", missingDeps) + ". Install them and redeploy.", LogLevel.ERROR);
+                fail(deployment);
+                return;
+            }
 
             String baseDir = "/apps/" + deployment.getId();
             var mkdirResult = sshService.execute(machine, "mkdir -p " + baseDir);
@@ -337,11 +360,7 @@ public class DeploymentService {
                     String tunnelToken = cloudflareService.getTunnelToken(
                             deployment.getOwner().getId(), tunnel.getId()
                     );
-                    String cfCmd = "docker rm -f cloudflared_" + deployment.getId() + " 2>/dev/null || true" +
-                            " && docker run -d --name cloudflared_" + deployment.getId() +
-                            " --network host cloudflare/cloudflared:latest" +
-                            " tunnel run --token " + tunnelToken;
-                    sshService.execute(machine, cfCmd);
+                    sshService.execute(machine, cloudflaredDockerCmd("cloudflared_" + deployment.getId(), tunnelToken));
                     deployment.setCloudfareTunnelId(tunnel.getId());
                     deployment.setCloudfareTunnelUrl("https://" + deployment.getTunnelHostname());
                     appendLog(deployment, "Tunnel active: https://" + deployment.getTunnelHostname(), LogLevel.INFO);
@@ -488,10 +507,7 @@ public class DeploymentService {
             cloudflareService.configureTunnelIngress(ownerId, tunnel.getId(), tunnelHostname, serviceUrl);
             cloudflareService.createDnsCname(ownerId, tunnelHostname, tunnel.getId());
             String tunnelToken = cloudflareService.getTunnelToken(ownerId, tunnel.getId());
-            String cfCmd = "docker rm -f cloudflared_" + deploymentId + " 2>/dev/null || true" +
-                    " && docker run -d --name cloudflared_" + deploymentId +
-                    " --network host cloudflare/cloudflared:latest tunnel run --token " + tunnelToken;
-            sshService.execute(machine, cfCmd);
+            sshService.execute(machine, cloudflaredDockerCmd("cloudflared_" + deploymentId, tunnelToken));
             deployment.setTunnelName(tunnelName);
             deployment.setTunnelHostname(tunnelHostname);
             deployment.setTunnelAppPort(tunnelAppPort);
@@ -555,6 +571,58 @@ public class DeploymentService {
     /** Single-quote a string for safe use in Unix shell commands. */
     private static String sq(String s) {
         return "'" + (s == null ? "" : s).replace("'", "'\\''") + "'";
+    }
+
+    /**
+     * Build a docker run command for cloudflared that passes the tunnel token via a
+     * temp env file so it doesn't appear in `ps aux` or /proc/pid/cmdline.
+     */
+    private static String cloudflaredDockerCmd(String containerName, String tunnelToken) {
+        String envFile = "/tmp/.cf_" + containerName + ".env";
+        return "printf 'TUNNEL_TOKEN=%s\\n' " + sq(tunnelToken) + " > " + envFile +
+               " && docker rm -f " + sq(containerName) + " 2>/dev/null || true" +
+               " && docker run -d --name " + sq(containerName) +
+               " --network host --env-file " + envFile +
+               " cloudflare/cloudflared:latest tunnel run" +
+               " && rm -f " + envFile;
+    }
+
+    private boolean commandExists(Machine machine, String cmd) {
+        var r = sshService.execute(machine, "command -v " + cmd + " 2>/dev/null");
+        return r.getExitCode() == 0 && !r.getStdout().isBlank();
+    }
+
+    private boolean dockerComposeAvailable(Machine machine) {
+        if (commandExists(machine, "docker-compose")) return true;
+        var r = sshService.execute(machine, "docker compose version 2>/dev/null");
+        return r.getExitCode() == 0;
+    }
+
+    /** Returns list of missing tool names for the given stack. Empty = all good. */
+    private List<String> preflightCheck(Machine machine, String stack) {
+        List<String> missing = new java.util.ArrayList<>();
+        if (!commandExists(machine, "git")) missing.add("git");
+        switch (stack) {
+            case "compose" -> {
+                if (!commandExists(machine, "docker")) missing.add("docker");
+                if (!dockerComposeAvailable(machine)) missing.add("docker compose");
+            }
+            case "docker" -> { if (!commandExists(machine, "docker")) missing.add("docker"); }
+            case "node"   -> {
+                if (!commandExists(machine, "node")) missing.add("node");
+                if (!commandExists(machine, "npm"))  missing.add("npm");
+            }
+            case "maven"  -> {
+                if (!commandExists(machine, "java")) missing.add("java");
+                if (!commandExists(machine, "mvn"))  missing.add("maven (mvn)");
+            }
+            case "gradle" -> { if (!commandExists(machine, "java")) missing.add("java"); }
+            case "python" -> {
+                if (!commandExists(machine, "python3")) missing.add("python3");
+                if (!commandExists(machine, "pip3") && !commandExists(machine, "pip")) missing.add("pip");
+            }
+        }
+        return missing;
     }
 
     /** Strip embedded GitHub tokens from git output before logging. */
