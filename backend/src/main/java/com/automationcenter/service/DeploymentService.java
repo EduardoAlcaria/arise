@@ -118,9 +118,8 @@ public class DeploymentService {
                 return;
             }
 
-            // Pre-flight: verify git is available before attempting clone
-            if (!commandExists(machine, "git")) {
-                appendLog(deployment, "Pre-flight failed: 'git' is not installed on the target machine. Install git and retry.", LogLevel.ERROR);
+            // Pre-flight: ensure git is installed (needed for clone)
+            if (!preflightAndInstall(machine, deployment, "git-only")) {
                 fail(deployment);
                 return;
             }
@@ -195,14 +194,10 @@ public class DeploymentService {
             deployment.setStatus(DeploymentStatus.DEPLOYING);
             deploymentRepository.save(deployment);
 
-            // Pre-flight: check stack-specific dependencies
-            if (!isWindows) {
-                List<String> missingDeps = preflightCheck(machine, stack);
-                if (!missingDeps.isEmpty()) {
-                    appendLog(deployment, "Pre-flight failed: missing dependencies on target machine: " + String.join(", ", missingDeps) + ". Install them and redeploy.", LogLevel.ERROR);
-                    fail(deployment);
-                    return;
-                }
+            // Pre-flight: ensure stack-specific dependencies are installed
+            if (!isWindows && !preflightAndInstall(machine, deployment, stack)) {
+                fail(deployment);
+                return;
             }
 
             // Stack-specific build step
@@ -274,11 +269,8 @@ public class DeploymentService {
 
             fixDockerCredentials(deployment, machine, false);
 
-            // Pre-flight: application deploys always require git + docker + docker compose
-            List<String> missingDeps = preflightCheck(machine, "compose");
-            if (!commandExists(machine, "git")) missingDeps.add(0, "git");
-            if (!missingDeps.isEmpty()) {
-                appendLog(deployment, "Pre-flight failed: missing dependencies on target machine: " + String.join(", ", missingDeps) + ". Install them and redeploy.", LogLevel.ERROR);
+            // Pre-flight: application deploys require git + docker + docker compose
+            if (!preflightAndInstall(machine, deployment, "compose")) {
                 fail(deployment);
                 return;
             }
@@ -598,7 +590,75 @@ public class DeploymentService {
         return r.getExitCode() == 0;
     }
 
-    /** Returns list of missing tool names for the given stack. Empty = all good. */
+    private static final java.util.Map<String, java.util.Map<String, String>> INSTALL_MAP;
+    static {
+        INSTALL_MAP = new java.util.HashMap<>();
+        INSTALL_MAP.put("git", Map.of(
+            "apt-get", "DEBIAN_FRONTEND=noninteractive apt-get install -y git",
+            "yum",     "yum install -y git",
+            "dnf",     "dnf install -y git",
+            "apk",     "apk add --no-cache git",
+            "brew",    "brew install git"
+        ));
+        INSTALL_MAP.put("docker", Map.of(
+            "apt-get", "curl -fsSL https://get.docker.com | sh && systemctl enable docker 2>/dev/null; systemctl start docker 2>/dev/null; true",
+            "yum",     "curl -fsSL https://get.docker.com | sh && systemctl enable docker 2>/dev/null; systemctl start docker 2>/dev/null; true",
+            "dnf",     "curl -fsSL https://get.docker.com | sh && systemctl enable docker 2>/dev/null; systemctl start docker 2>/dev/null; true",
+            "apk",     "apk add --no-cache docker && rc-update add docker boot 2>/dev/null; service docker start 2>/dev/null; true",
+            "brew",    "brew install --cask docker"
+        ));
+        INSTALL_MAP.put("docker compose", Map.of(
+            "apt-get", "DEBIAN_FRONTEND=noninteractive apt-get install -y docker-compose-plugin",
+            "yum",     "yum install -y docker-compose-plugin",
+            "dnf",     "dnf install -y docker-compose-plugin",
+            "apk",     "apk add --no-cache docker-compose",
+            "brew",    "brew install docker-compose"
+        ));
+        INSTALL_MAP.put("node", Map.of(
+            "apt-get", "DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs",
+            "yum",     "yum install -y nodejs",
+            "dnf",     "dnf install -y nodejs",
+            "apk",     "apk add --no-cache nodejs",
+            "brew",    "brew install node"
+        ));
+        INSTALL_MAP.put("npm", Map.of(
+            "apt-get", "DEBIAN_FRONTEND=noninteractive apt-get install -y npm",
+            "yum",     "yum install -y npm",
+            "dnf",     "dnf install -y npm",
+            "apk",     "apk add --no-cache npm",
+            "brew",    "brew install node"
+        ));
+        INSTALL_MAP.put("java", Map.of(
+            "apt-get", "DEBIAN_FRONTEND=noninteractive apt-get install -y openjdk-17-jdk",
+            "yum",     "yum install -y java-17-openjdk-devel",
+            "dnf",     "dnf install -y java-17-openjdk-devel",
+            "apk",     "apk add --no-cache openjdk17",
+            "brew",    "brew install openjdk"
+        ));
+        INSTALL_MAP.put("maven (mvn)", Map.of(
+            "apt-get", "DEBIAN_FRONTEND=noninteractive apt-get install -y maven",
+            "yum",     "yum install -y maven",
+            "dnf",     "dnf install -y maven",
+            "apk",     "apk add --no-cache maven",
+            "brew",    "brew install maven"
+        ));
+        INSTALL_MAP.put("python3", Map.of(
+            "apt-get", "DEBIAN_FRONTEND=noninteractive apt-get install -y python3",
+            "yum",     "yum install -y python3",
+            "dnf",     "dnf install -y python3",
+            "apk",     "apk add --no-cache python3",
+            "brew",    "brew install python3"
+        ));
+        INSTALL_MAP.put("pip", Map.of(
+            "apt-get", "DEBIAN_FRONTEND=noninteractive apt-get install -y python3-pip",
+            "yum",     "yum install -y python3-pip",
+            "dnf",     "dnf install -y python3-pip",
+            "apk",     "apk add --no-cache py3-pip",
+            "brew",    "brew install python3"
+        ));
+    }
+
+    /** Returns list of missing tool names for the given stack. Git is always checked. */
     private List<String> preflightCheck(Machine machine, String stack) {
         List<String> missing = new java.util.ArrayList<>();
         if (!commandExists(machine, "git")) missing.add("git");
@@ -623,6 +683,61 @@ public class DeploymentService {
             }
         }
         return missing;
+    }
+
+    private String detectPackageManager(Machine machine) {
+        for (String pm : new String[]{"apt-get", "dnf", "yum", "apk", "brew"}) {
+            if (commandExists(machine, pm)) return pm;
+        }
+        return "unknown";
+    }
+
+    /**
+     * Check for missing deps and auto-install any that are absent.
+     * Returns true if all deps are available after the attempt, false if any install failed.
+     */
+    private boolean preflightAndInstall(Machine machine, Deployment deployment, String stack) {
+        List<String> missing = preflightCheck(machine, stack);
+        if (missing.isEmpty()) return true;
+
+        appendLog(deployment, "Missing dependencies: " + String.join(", ", missing) + ". Auto-installing...", LogLevel.INFO);
+
+        String pkgManager = detectPackageManager(machine);
+        if ("unknown".equals(pkgManager)) {
+            appendLog(deployment, "Cannot auto-install: no supported package manager found (apt-get/yum/dnf/apk/brew). Install manually: " + String.join(", ", missing), LogLevel.ERROR);
+            return false;
+        }
+        appendLog(deployment, "Package manager: " + pkgManager, LogLevel.INFO);
+
+        boolean aptUpdated = false;
+        for (String dep : missing) {
+            if ("apt-get".equals(pkgManager) && !aptUpdated) {
+                appendLog(deployment, "Running apt-get update...", LogLevel.INFO);
+                sshService.execute(machine, "apt-get update -qq 2>&1");
+                aptUpdated = true;
+            }
+            var cmds = INSTALL_MAP.get(dep);
+            if (cmds == null || !cmds.containsKey(pkgManager)) {
+                appendLog(deployment, "No installer for '" + dep + "' on " + pkgManager + " — install manually.", LogLevel.WARN);
+                continue;
+            }
+            appendLog(deployment, "Installing " + dep + "...", LogLevel.INFO);
+            var result = sshService.execute(machine, cmds.get(pkgManager));
+            if (!result.getStdout().isBlank()) appendLog(deployment, result.getStdout(), LogLevel.INFO);
+            if (result.getExitCode() != 0) {
+                appendLog(deployment, "Failed to install " + dep + ": " + result.getStderr(), LogLevel.ERROR);
+                return false;
+            }
+            appendLog(deployment, dep + " installed.", LogLevel.INFO);
+        }
+
+        List<String> stillMissing = preflightCheck(machine, stack);
+        if (!stillMissing.isEmpty()) {
+            appendLog(deployment, "Post-install check failed — still missing: " + String.join(", ", stillMissing), LogLevel.ERROR);
+            return false;
+        }
+        appendLog(deployment, "All dependencies ready.", LogLevel.INFO);
+        return true;
     }
 
     /** Strip embedded GitHub tokens from git output before logging. */
