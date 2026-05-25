@@ -1,5 +1,6 @@
 package com.automationcenter.service;
 
+import com.automationcenter.dto.github.AriseConfig;
 import com.automationcenter.dto.github.GitHubBranchResponse;
 import com.automationcenter.dto.github.GitHubRepoResponse;
 import com.automationcenter.dto.github.GitHubTreeItem;
@@ -214,6 +215,28 @@ public class GitHubService {
         } catch (Exception e) {
             log.warn("Could not fetch env var keys for {}/{}: {}", owner, repo, e.getMessage());
             return List.of();
+        }
+    }
+
+    public AriseConfig getAriseConfig(Long userId, String owner, String repo, String branch) {
+        String content = getFileContent(userId, owner, repo, ".arise.yml", branch);
+        if (content == null || content.isBlank()) return null;
+        try {
+            org.yaml.snakeyaml.Yaml yaml = new org.yaml.snakeyaml.Yaml();
+            @SuppressWarnings("unchecked")
+            java.util.Map<String, Object> data = yaml.load(content);
+            if (data == null) return null;
+            String compose = data.get("compose") instanceof String s ? s : null;
+            Integer port = data.get("port") instanceof Number n ? n.intValue() : null;
+            @SuppressWarnings("unchecked")
+            java.util.List<String> env = data.get("env") instanceof java.util.List<?> l
+                    ? l.stream().map(Object::toString).toList() : List.of();
+            String name = data.get("name") instanceof String s ? s : null;
+            String br = data.get("branch") instanceof String s ? s : null;
+            return new AriseConfig(compose, port, env, name, br);
+        } catch (Exception e) {
+            log.warn("Could not parse .arise.yml for {}/{}: {}", owner, repo, e.getMessage());
+            return null;
         }
     }
 
