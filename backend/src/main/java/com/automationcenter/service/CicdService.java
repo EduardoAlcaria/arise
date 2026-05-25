@@ -389,12 +389,16 @@ public class CicdService {
                 Map<String, Object> item = new LinkedHashMap<>();
                 item.put("id", run.get("id"));
                 item.put("name", run.get("name"));
+                item.put("workflowName", run.get("name")); // alias for frontend
+                item.put("displayTitle", run.get("display_title"));
                 item.put("status", run.get("status"));
                 item.put("conclusion", run.get("conclusion"));
                 item.put("createdAt", run.get("created_at"));
                 item.put("updatedAt", run.get("updated_at"));
                 item.put("headBranch", run.get("head_branch"));
+                item.put("headSha", run.get("head_sha"));
                 item.put("event", run.get("event"));
+                item.put("htmlUrl", run.get("html_url"));
                 return item;
             }).toList();
         } catch (Exception e) {
