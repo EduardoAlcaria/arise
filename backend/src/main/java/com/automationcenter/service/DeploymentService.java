@@ -160,6 +160,9 @@ public class DeploymentService {
                 return;
             }
 
+            deployment.setDeployDir(repoDir);
+            deploymentRepository.save(deployment);
+
             if (deployment.getRepoConfigs() != null) {
                 if (!isWindows) {
                     try {
@@ -202,6 +205,11 @@ public class DeploymentService {
             if (!isWindows && !preflightAndInstall(machine, deployment, stack)) {
                 fail(deployment);
                 return;
+            }
+
+            // Tear down any previous successful deploy of this repo on this machine
+            if (!isWindows && "compose".equals(stack)) {
+                teardownPreviousDeployment(deployment, machine);
             }
 
             // Stack-specific build step
@@ -327,6 +335,8 @@ public class DeploymentService {
 
             deployment.setStatus(DeploymentStatus.DEPLOYING);
             deploymentRepository.save(deployment);
+
+            teardownPreviousDeployment(deployment, machine);
 
             String composeCmd = "cd " + baseDir + " && docker compose up --build -d 2>&1";
             appendLog(deployment, "Running docker compose up --build -d", LogLevel.INFO);
@@ -485,6 +495,12 @@ public class DeploymentService {
             builder.applicationServices(source.getApplicationServices());
         if (source.getApplicationConfigs() != null)
             builder.applicationConfigs(source.getApplicationConfigs());
+        // Carry over REPOSITORY injected config files
+        if (source.getRepoConfigs() != null)
+            builder.repoConfigs(source.getRepoConfigs());
+        // Carry over webhook URL
+        if (source.getWebhookUrl() != null)
+            builder.webhookUrl(source.getWebhookUrl());
         // Carry over tunnel config
         if (source.getTunnelName() != null)
             builder.tunnelName(source.getTunnelName())
@@ -769,6 +785,32 @@ public class DeploymentService {
         }
         appendLog(deployment, "All dependencies ready.", LogLevel.INFO);
         return true;
+    }
+
+    private void teardownPreviousDeployment(Deployment current, Machine machine) {
+        try {
+            var prev = current.getRepositoryUrl() != null
+                    ? deploymentRepository.findTopByRepositoryUrlAndMachine_IdAndTypeAndStatusAndIdNotOrderByCreatedAtDesc(
+                            current.getRepositoryUrl(), machine.getId(), current.getType(),
+                            DeploymentStatus.SUCCESS, current.getId())
+                    : deploymentRepository.findTopByMachine_IdAndTypeAndStatusAndIdNotOrderByCreatedAtDesc(
+                            machine.getId(), current.getType(), DeploymentStatus.SUCCESS, current.getId());
+
+            if (prev.isEmpty()) return;
+            String prevDir = prev.get().getDeployDir();
+            if (prevDir == null || prevDir.isBlank()) return;
+
+            appendLog(current, "Tearing down previous deployment from " + prevDir, LogLevel.INFO);
+            var result = sshService.execute(machine,
+                    "cd " + sq(prevDir) + " && docker compose down --remove-orphans 2>&1");
+            if (result.getExitCode() != 0) {
+                appendLog(current, "Teardown warning: " + result.getStdout() + result.getStderr(), LogLevel.WARN);
+            } else {
+                appendLog(current, "Previous deployment torn down.", LogLevel.INFO);
+            }
+        } catch (Exception e) {
+            appendLog(current, "Teardown failed (non-fatal): " + e.getMessage(), LogLevel.WARN);
+        }
     }
 
     /** Strip embedded GitHub tokens from git output before logging. */
