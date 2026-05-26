@@ -1,5 +1,6 @@
 package com.automationcenter.service;
 
+import com.automationcenter.entity.AwsResources;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
@@ -7,10 +8,7 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -110,26 +108,36 @@ public class TerraformParserService {
     }
 
     private String resourceTypeToService(String resourceType) {
-        if (resourceType.startsWith("aws_lambda")) return "lambda";
-        if (resourceType.startsWith("aws_ecs")) return "ecs";
-        if (resourceType.startsWith("aws_rds") || resourceType.startsWith("aws_db")) return "rds";
-        if (resourceType.startsWith("aws_s3")) return "s3";
-        if (resourceType.startsWith("aws_vpc") || resourceType.startsWith("aws_subnet")
-                || resourceType.startsWith("aws_security_group")) return "vpc";
-        if (resourceType.startsWith("aws_api_gateway") || resourceType.startsWith("aws_apigatewayv2")) return "apigateway";
-        if (resourceType.startsWith("aws_sqs")) return "sqs";
-        if (resourceType.startsWith("aws_sns")) return "sns";
-        if (resourceType.startsWith("aws_dynamodb")) return "dynamodb";
-        if (resourceType.startsWith("aws_cloudfront")) return "cloudfront";
-        if (resourceType.startsWith("aws_iam")) return "iam";
-        if (resourceType.startsWith("aws_ec2") || resourceType.startsWith("aws_instance")) return "ec2";
-        return "other";
+
+        List<AwsResources> list = Arrays.stream(AwsResources.values())
+                .filter(s -> s.getService().equals(resourceType))
+                .toList();
+
+        return list.getFirst().getService();
+
+
+        //Todo i just change map what these string values to the AwsResource
+
+//        if (resourceType.startsWith("aws_lambda")) return "lambda";
+//        if (resourceType.startsWith("aws_ecs")) return "ecs";
+//        if (resourceType.startsWith("aws_rds") || resourceType.startsWith("aws_db")) return "rds";
+//        if (resourceType.startsWith("aws_s3")) return "s3";
+//        if (resourceType.startsWith("aws_vpc") || resourceType.startsWith("aws_subnet")
+//                || resourceType.startsWith("aws_security_group")) return "vpc";
+//        if (resourceType.startsWith("aws_api_gateway") || resourceType.startsWith("aws_apigatewayv2")) return "apigateway";
+//        if (resourceType.startsWith("aws_sqs")) return "sqs";
+//        if (resourceType.startsWith("aws_sns")) return "sns";
+//        if (resourceType.startsWith("aws_dynamodb")) return "dynamodb";
+//        if (resourceType.startsWith("aws_cloudfront")) return "cloudfront";
+//        if (resourceType.startsWith("aws_iam")) return "iam";
+//        if (resourceType.startsWith("aws_ec2") || resourceType.startsWith("aws_instance")) return "ec2";
+//        return "other";
     }
 
     private void deleteDirQuietly(File dir) {
         try {
             Files.walk(dir.toPath())
-                    .sorted(java.util.Comparator.reverseOrder())
+                    .sorted(Comparator.reverseOrder())
                     .map(Path::toFile)
                     .forEach(File::delete);
         } catch (IOException ignored) {}
