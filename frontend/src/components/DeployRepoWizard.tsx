@@ -156,9 +156,19 @@ export default function DeployRepoWizard({
     }
   }
 
-  const loadAriseConfigForRepo = async (owner: string, repo: string, branch: string) => {
+  const loadAriseConfigForRepo = async (owner: string, repo: string, branch: string, applyBranch = true) => {
     const config = await getAriseConfig(owner, repo, branch)
     setAriseConfig(config)
+    if (config?.branch && applyBranch && config.branch !== branch) {
+      const ariseBranch = config.branch
+      setSelections(prev => {
+        const next = new Map(prev)
+        const sel = next.get(`${owner}/${repo}`)
+        if (sel) next.set(`${owner}/${repo}`, { ...sel, branch: ariseBranch })
+        return next
+      })
+      loadEnvVarsForRepo(owner, repo, ariseBranch)
+    }
     if (config?.env && config.env.length > 0) {
       setEnvVarKeys(prev => [...config.env!, ...prev.filter(k => !config.env!.includes(k))])
       setEnvVars(prev => {
@@ -244,7 +254,7 @@ export default function DeployRepoWizard({
     if (mode === 'single') {
       const parts = repoFullName.split('/')
       loadEnvVarsForRepo(parts[0], parts[1], branch)
-      loadAriseConfigForRepo(parts[0], parts[1], branch)
+      loadAriseConfigForRepo(parts[0], parts[1], branch, false)
     }
   }
 
