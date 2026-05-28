@@ -187,6 +187,9 @@ export default function DeployRepoWizard({
         return prev
       })
     }
+    if (config?.port != null) {
+      setTunnelAppPort(config.port)
+    }
   }
 
   const validatePat = async () => {
