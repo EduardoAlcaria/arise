@@ -51,6 +51,10 @@ management:
 encryption:
   secret: ${ENCRYPTION_SECRET:change-me-in-production-use-32-chars}
 
+ssh:
+  command-timeout-seconds: ${SSH_COMMAND_TIMEOUT_SECONDS:120}
+  long-command-timeout-seconds: ${SSH_LONG_COMMAND_TIMEOUT_SECONDS:1800}
+
 logging:
   level:
     com.automationcenter: DEBUG
