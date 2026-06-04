@@ -248,6 +248,10 @@ public class DeploymentService {
                 String composeFileFlag = ariseComposeFile != null ? " -f " + sq(ariseComposeFile) : "";
                 var psResult = sshService.execute(machine, "cd " + repoDir + " && docker compose" + composeFileFlag + " ps 2>&1");
                 appendLog(deployment, "--- Container status ---\n" + psResult.getStdout(), LogLevel.INFO);
+                if (!composeHealthy(deployment, machine, repoDir, composeFileFlag)) {
+                    fail(deployment);
+                    return;
+                }
             }
 
             // Optional Cloudflare tunnel for repo deployments
@@ -370,6 +374,10 @@ public class DeploymentService {
 
             var psResult = sshService.execute(machine, "cd " + baseDir + " && docker compose ps 2>&1");
             appendLog(deployment, "--- Container status ---\n" + psResult.getStdout(), LogLevel.INFO);
+            if (!composeHealthy(deployment, machine, baseDir, "")) {
+                fail(deployment);
+                return;
+            }
 
             if (deployment.getTunnelName() != null && !deployment.getTunnelName().isBlank()) {
                 try {
@@ -832,6 +840,34 @@ public class DeploymentService {
         } catch (Exception e) {
             appendLog(current, "Teardown failed (non-fatal): " + e.getMessage(), LogLevel.WARN);
         }
+    }
+
+    /**
+     * Inspect running containers via `docker compose ps --format json`.
+     * Returns true if all services are running (or state can't be determined —
+     * conservative, never a false failure). Returns false and logs the offending
+     * services + their recent logs if any service is exited/restarting.
+     */
+    private boolean composeHealthy(Deployment deployment, Machine machine, String repoDir, String composeFileFlag) {
+        var ps = sshService.execute(machine,
+                "cd " + sq(repoDir) + " && docker compose" + composeFileFlag + " ps --format json 2>/dev/null");
+        var states = ComposePsParser.parse(ps.getStdout(), objectMapper);
+        var bad = ComposePsParser.unhealthy(states);
+        if (bad.isEmpty()) return true;
+
+        for (var svc : bad) {
+            appendLog(deployment, "Service '" + svc.service() + "' is " + svc.state()
+                    + " — fetching recent logs:", LogLevel.ERROR);
+            var logs = sshService.execute(machine,
+                    "cd " + sq(repoDir) + " && docker compose" + composeFileFlag
+                            + " logs --tail=50 " + sq(svc.service()) + " 2>&1",
+                    sshService.longTimeoutSeconds());
+            appendLog(deployment, logs.getStdout(), LogLevel.ERROR);
+        }
+        appendLog(deployment, "Health check failed: "
+                + bad.stream().map(ComposePsParser.ServiceState::service).toList()
+                + " not running.", LogLevel.ERROR);
+        return false;
     }
 
     /** Strip embedded GitHub tokens from git output before logging. */
