@@ -256,22 +256,30 @@ public class DeploymentService {
 
             // Optional Cloudflare tunnel for repo deployments
             if (deployment.getTunnelName() != null && !deployment.getTunnelName().isBlank()) {
+                String createdTunnelId = null;
                 try {
                     appendLog(deployment, "Creating Cloudflare tunnel: " + deployment.getTunnelName(), LogLevel.INFO);
                     String secret = java.util.UUID.randomUUID().toString().replace("-", "");
                     var tunnel = cloudflareService.createTunnel(deployment.getOwner().getId(),
                             new CloudflareTunnelRequest(deployment.getTunnelName(), secret));
+                    createdTunnelId = tunnel.getId();
                     String serviceUrl = "http://localhost:" + deployment.getTunnelAppPort();
                     cloudflareService.configureTunnelIngress(deployment.getOwner().getId(), tunnel.getId(),
                             deployment.getTunnelHostname(), serviceUrl);
                     cloudflareService.createDnsCname(deployment.getOwner().getId(), deployment.getTunnelHostname(), tunnel.getId());
                     String tunnelToken = cloudflareService.getTunnelToken(deployment.getOwner().getId(), tunnel.getId());
-                    sshService.execute(machine, cloudflaredDockerCmd("cloudflared_" + deploymentId, tunnelToken));
+                    sshService.execute(machine, cloudflaredDockerCmd("cloudflared_" + deploymentId, tunnelToken),
+                            sshService.longTimeoutSeconds());
                     deployment.setCloudfareTunnelId(tunnel.getId());
                     deployment.setCloudfareTunnelUrl("https://" + deployment.getTunnelHostname());
                     appendLog(deployment, "Tunnel active: https://" + deployment.getTunnelHostname(), LogLevel.INFO);
                 } catch (Exception e) {
-                    appendLog(deployment, "Cloudflare tunnel setup failed: " + e.getMessage(), LogLevel.WARN);
+                    appendLog(deployment, "⚠ App is running locally but the Cloudflare tunnel FAILED — "
+                            + "not exposed: " + e.getMessage(), LogLevel.ERROR);
+                    if (createdTunnelId != null) {
+                        appendLog(deployment, "Cleaning up orphaned tunnel " + createdTunnelId, LogLevel.INFO);
+                        cloudflareService.deleteTunnel(deployment.getOwner().getId(), createdTunnelId);
+                    }
                 }
             }
 
@@ -380,6 +388,7 @@ public class DeploymentService {
             }
 
             if (deployment.getTunnelName() != null && !deployment.getTunnelName().isBlank()) {
+                String createdTunnelId = null;
                 try {
                     appendLog(deployment, "Creating Cloudflare tunnel: " + deployment.getTunnelName(), LogLevel.INFO);
                     String secret = java.util.UUID.randomUUID().toString().replace("-", "");
@@ -387,6 +396,7 @@ public class DeploymentService {
                             deployment.getOwner().getId(),
                             new CloudflareTunnelRequest(deployment.getTunnelName(), secret)
                     );
+                    createdTunnelId = tunnel.getId();
                     String serviceUrl = "http://localhost:" + deployment.getTunnelAppPort();
                     cloudflareService.configureTunnelIngress(
                             deployment.getOwner().getId(), tunnel.getId(),
@@ -398,12 +408,18 @@ public class DeploymentService {
                     String tunnelToken = cloudflareService.getTunnelToken(
                             deployment.getOwner().getId(), tunnel.getId()
                     );
-                    sshService.execute(machine, cloudflaredDockerCmd("cloudflared_" + deployment.getId(), tunnelToken));
+                    sshService.execute(machine, cloudflaredDockerCmd("cloudflared_" + deployment.getId(), tunnelToken),
+                            sshService.longTimeoutSeconds());
                     deployment.setCloudfareTunnelId(tunnel.getId());
                     deployment.setCloudfareTunnelUrl("https://" + deployment.getTunnelHostname());
                     appendLog(deployment, "Tunnel active: https://" + deployment.getTunnelHostname(), LogLevel.INFO);
                 } catch (Exception e) {
-                    appendLog(deployment, "Cloudflare tunnel setup failed: " + e.getMessage(), LogLevel.WARN);
+                    appendLog(deployment, "⚠ App is running locally but the Cloudflare tunnel FAILED — "
+                            + "not exposed: " + e.getMessage(), LogLevel.ERROR);
+                    if (createdTunnelId != null) {
+                        appendLog(deployment, "Cleaning up orphaned tunnel " + createdTunnelId, LogLevel.INFO);
+                        cloudflareService.deleteTunnel(deployment.getOwner().getId(), createdTunnelId);
+                    }
                 }
             }
 
