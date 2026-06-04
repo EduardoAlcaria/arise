@@ -7,6 +7,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -20,4 +21,6 @@ public interface DeploymentRepository extends JpaRepository<Deployment, Long> {
 
     Optional<Deployment> findTopByMachine_IdAndTypeAndStatusAndIdNotOrderByCreatedAtDesc(
             Long machineId, DeploymentType type, DeploymentStatus status, Long excludeId);
+
+    List<Deployment> findByStatusIn(Collection<DeploymentStatus> statuses);
 }
