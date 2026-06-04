@@ -3,18 +3,21 @@ package com.automationcenter.service;
 import com.automationcenter.dto.machine.SshCommandResponse;
 import com.automationcenter.entity.Machine;
 import com.automationcenter.entity.TunnelType;
+import com.automationcenter.util.LineBuffer;
 import com.jcraft.jsch.ChannelExec;
 import com.jcraft.jsch.JSch;
 import com.jcraft.jsch.Session;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
+import java.util.function.Consumer;
 
 @Service
 @Slf4j
@@ -24,8 +27,19 @@ public class SshService {
 
     private final SshHostKeyStore hostKeyStore;
 
+    @Value("${ssh.command-timeout-seconds:120}")
+    private long defaultTimeoutSeconds;
+
+    @Value("${ssh.long-command-timeout-seconds:1800}")
+    private long longTimeoutSeconds;
+
     public SshService(SshHostKeyStore hostKeyStore) {
         this.hostKeyStore = hostKeyStore;
+    }
+
+    /** Long timeout for heavy operations (clone, compose build, runner install). */
+    public long longTimeoutSeconds() {
+        return longTimeoutSeconds;
     }
 
     /**
@@ -136,8 +150,24 @@ public class SshService {
         throw new IOException("cloudflared did not bind on localhost:" + port + " within " + timeoutMs + "ms");
     }
 
-    /** Execute a single command on the machine, return stdout/stderr/exitCode. */
+    /** Execute a command with the default timeout, no streaming. */
     public SshCommandResponse execute(Machine machine, String command) {
+        return execute(machine, command, defaultTimeoutSeconds, null);
+    }
+
+    /** Execute a command with an explicit timeout, no streaming. */
+    public SshCommandResponse execute(Machine machine, String command, long timeoutSeconds) {
+        return execute(machine, command, timeoutSeconds, null);
+    }
+
+    /**
+     * Execute a command with a timeout and optional live line streaming.
+     * stdout lines are delivered to {@code onLine} as they arrive; the full
+     * stdout/stderr text is still accumulated for the returned response so
+     * exit-code and string checks keep working. On timeout the channel is
+     * disconnected and exit code -1 is returned with a timeout message.
+     */
+    public SshCommandResponse execute(Machine machine, String command, long timeoutSeconds, Consumer<String> onLine) {
         Session session = null;
         try {
             session = openSession(machine);
@@ -148,24 +178,68 @@ public class SshService {
             String fullCommand = "export PATH=/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:$PATH; " + command;
             channel.setCommand(fullCommand);
 
-            ByteArrayOutputStream stdout = new ByteArrayOutputStream();
-            ByteArrayOutputStream stderr = new ByteArrayOutputStream();
-            channel.setOutputStream(stdout);
-            channel.setErrStream(stderr);
+            InputStream stdoutStream = channel.getInputStream();
+            InputStream stderrStream = channel.getExtInputStream();
             channel.connect();
 
-            while (!channel.isClosed()) {
+            StringBuilder stdout = new StringBuilder();
+            StringBuilder stderr = new StringBuilder();
+            LineBuffer lineBuffer = onLine != null ? new LineBuffer(onLine) : null;
+
+            byte[] buf = new byte[8192];
+            long deadline = System.currentTimeMillis() + timeoutSeconds * 1000L;
+            boolean timedOut = false;
+
+            while (true) {
+                while (stdoutStream.available() > 0) {
+                    int n = stdoutStream.read(buf, 0, buf.length);
+                    if (n < 0) break;
+                    String chunk = new String(buf, 0, n, StandardCharsets.UTF_8);
+                    stdout.append(chunk);
+                    if (lineBuffer != null) lineBuffer.append(chunk);
+                }
+                while (stderrStream.available() > 0) {
+                    int n = stderrStream.read(buf, 0, buf.length);
+                    if (n < 0) break;
+                    stderr.append(new String(buf, 0, n, StandardCharsets.UTF_8));
+                }
+                if (channel.isClosed()) {
+                    // drain any final bytes
+                    while (stdoutStream.available() > 0) {
+                        int n = stdoutStream.read(buf, 0, buf.length);
+                        if (n < 0) break;
+                        String chunk = new String(buf, 0, n, StandardCharsets.UTF_8);
+                        stdout.append(chunk);
+                        if (lineBuffer != null) lineBuffer.append(chunk);
+                    }
+                    while (stderrStream.available() > 0) {
+                        int n = stderrStream.read(buf, 0, buf.length);
+                        if (n < 0) break;
+                        stderr.append(new String(buf, 0, n, StandardCharsets.UTF_8));
+                    }
+                    break;
+                }
+                if (System.currentTimeMillis() > deadline) {
+                    timedOut = true;
+                    break;
+                }
                 Thread.sleep(100);
+            }
+
+            if (lineBuffer != null) lineBuffer.flush();
+
+            if (timedOut) {
+                channel.disconnect();
+                return new SshCommandResponse(
+                        stdout.toString(),
+                        "Command timed out after " + timeoutSeconds + "s",
+                        -1);
             }
 
             int exitCode = channel.getExitStatus();
             channel.disconnect();
+            return new SshCommandResponse(stdout.toString(), stderr.toString(), exitCode);
 
-            return new SshCommandResponse(
-                    stdout.toString(StandardCharsets.UTF_8),
-                    stderr.toString(StandardCharsets.UTF_8),
-                    exitCode
-            );
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return new SshCommandResponse("", "Interrupted: " + e.getMessage(), -1);
