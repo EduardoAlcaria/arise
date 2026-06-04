@@ -152,8 +152,8 @@ public class DeploymentService {
                     ? "rmdir /s /q \"" + repoDir + "\" 2>nul & git clone " + cloneUrl + " -b \"" + deployment.getBranch().replace("\"", "") + "\" \"" + repoDir + "\""
                     : "rm -rf " + repoDir + " && git clone " + sq(cloneUrl) + " -b " + sq(deployment.getBranch()) + " " + repoDir;
             appendLog(deployment, "Cloning repository: " + deployment.getRepositoryUrl(), LogLevel.INFO);
-            var cloneResult = sshService.execute(machine, cloneCmd);
-            appendLog(deployment, sanitizeGitOutput(cloneResult.getStdout()), LogLevel.INFO);
+            var cloneResult = sshService.execute(machine, cloneCmd, sshService.longTimeoutSeconds(),
+                    line -> appendLog(deployment, sanitizeGitOutput(line), LogLevel.INFO));
             if (cloneResult.getExitCode() != 0) {
                 appendLog(deployment, "Clone failed: " + sanitizeGitOutput(cloneResult.getStderr()), LogLevel.ERROR);
                 fail(deployment);
@@ -235,8 +235,8 @@ public class DeploymentService {
             String buildCmd = getBuildCommand(stack, repoDir, isWindows, ariseComposeFile);
             if (!buildCmd.isEmpty()) {
                 appendLog(deployment, "Running build: " + buildCmd, LogLevel.INFO);
-                var buildResult = sshService.execute(machine, buildCmd);
-                appendLog(deployment, buildResult.getStdout(), LogLevel.INFO);
+                var buildResult = sshService.execute(machine, buildCmd, sshService.longTimeoutSeconds(),
+                        line -> appendLog(deployment, line, LogLevel.INFO));
                 if (buildResult.getExitCode() != 0) {
                     appendLog(deployment, "Build failed: " + buildResult.getStderr(), LogLevel.ERROR);
                     fail(deployment);
@@ -360,8 +360,8 @@ public class DeploymentService {
 
             String composeCmd = "cd " + baseDir + " && docker compose up --build -d 2>&1";
             appendLog(deployment, "Running docker compose up --build -d", LogLevel.INFO);
-            var composeResult = sshService.execute(machine, composeCmd);
-            appendLog(deployment, composeResult.getStdout(), LogLevel.INFO);
+            var composeResult = sshService.execute(machine, composeCmd, sshService.longTimeoutSeconds(),
+                    line -> appendLog(deployment, line, LogLevel.INFO));
             if (composeResult.getExitCode() != 0) {
                 appendLog(deployment, "docker compose failed: " + composeResult.getStderr(), LogLevel.ERROR);
                 fail(deployment);
@@ -822,7 +822,8 @@ public class DeploymentService {
 
             appendLog(current, "Tearing down previous deployment from " + prevDir, LogLevel.INFO);
             var result = sshService.execute(machine,
-                    "cd " + sq(prevDir) + " && docker compose down --remove-orphans 2>&1");
+                    "cd " + sq(prevDir) + " && docker compose down --remove-orphans 2>&1",
+                    sshService.longTimeoutSeconds());
             if (result.getExitCode() != 0) {
                 appendLog(current, "Teardown warning: " + result.getStdout() + result.getStderr(), LogLevel.WARN);
             } else {
