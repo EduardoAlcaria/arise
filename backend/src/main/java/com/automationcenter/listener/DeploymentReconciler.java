@@ -26,6 +26,13 @@ public class DeploymentReconciler {
 
     @EventListener(ApplicationReadyEvent.class)
     public void reconcileOrphans() {
+        // Backfill any pre-@Version rows (lock_version IS NULL) before loading/saving them,
+        // otherwise merging a null-version detached entity throws and crashes startup.
+        int backfilled = deploymentRepository.initializeNullLockVersions();
+        if (backfilled > 0) {
+            log.info("Initialized lock version on {} legacy deployment row(s)", backfilled);
+        }
+
         List<Deployment> stuck = deploymentRepository.findByStatusIn(List.of(
                 DeploymentStatus.PENDING, DeploymentStatus.BUILDING, DeploymentStatus.DEPLOYING));
         int reconciled = 0;
