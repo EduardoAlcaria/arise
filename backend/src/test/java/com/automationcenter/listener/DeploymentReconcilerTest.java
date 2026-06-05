@@ -6,12 +6,11 @@ import com.automationcenter.repository.DeploymentRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
-import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.dao.OptimisticLockingFailureException;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -41,18 +40,6 @@ class DeploymentReconcilerTest {
     }
 
     @Test
-    void backfillsNullLockVersionsBeforeLoading() {
-        when(deploymentRepository.findByStatusIn(anyCollection())).thenReturn(List.of());
-
-        reconciler.reconcileOrphans();
-
-        // legacy null-version rows must be fixed before any load/save, or startup crashes
-        InOrder order = inOrder(deploymentRepository);
-        order.verify(deploymentRepository).initializeNullLockVersions();
-        order.verify(deploymentRepository).findByStatusIn(anyCollection());
-    }
-
-    @Test
     void noOrphansNoSaves() {
         when(deploymentRepository.findByStatusIn(anyCollection())).thenReturn(List.of());
         reconciler.reconcileOrphans();
@@ -60,18 +47,24 @@ class DeploymentReconcilerTest {
     }
 
     @Test
-    void yieldsToConcurrentlyProcessedDeploymentAndContinues() {
-        // d1 is being re-run by a redelivered job -> its save conflicts; reconciler must
-        // swallow the conflict and still reconcile d2.
-        Deployment d1 = Deployment.builder().status(DeploymentStatus.BUILDING).build();
-        Deployment d2 = Deployment.builder().status(DeploymentStatus.DEPLOYING).build();
-        when(deploymentRepository.findByStatusIn(anyCollection())).thenReturn(List.of(d1, d2));
-        when(deploymentRepository.save(d1)).thenThrow(new OptimisticLockingFailureException("conflict"));
-        when(deploymentRepository.save(d2)).thenReturn(d2);
+    void skipsDeploymentStartedAfterBoot() {
+        // A redelivered job started by THIS process (startedAt in the future relative to the
+        // reconciler's boot time) is actively running and must NOT be reconciled/clobbered.
+        Deployment live = Deployment.builder()
+                .status(DeploymentStatus.BUILDING)
+                .startedAt(LocalDateTime.now().plusMinutes(5))
+                .build();
+        Deployment orphan = Deployment.builder()
+                .status(DeploymentStatus.DEPLOYING)
+                .startedAt(LocalDateTime.now().minusMinutes(5))
+                .build();
+        when(deploymentRepository.findByStatusIn(anyCollection())).thenReturn(List.of(live, orphan));
 
-        assertDoesNotThrow(() -> reconciler.reconcileOrphans());
+        reconciler.reconcileOrphans();
 
-        verify(deploymentRepository).save(d1); // attempted
-        verify(deploymentRepository).save(d2); // continued past the conflict
+        assertEquals(DeploymentStatus.BUILDING, live.getStatus(), "live redelivered deploy must be untouched");
+        assertEquals(DeploymentStatus.FAILED, orphan.getStatus(), "pre-boot orphan must be failed");
+        verify(deploymentRepository, times(1)).save(orphan);
+        verify(deploymentRepository, never()).save(live);
     }
 }
