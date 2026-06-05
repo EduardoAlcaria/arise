@@ -4,6 +4,7 @@ import com.automationcenter.dto.machine.SshCommandResponse;
 import com.automationcenter.entity.Machine;
 import com.automationcenter.entity.TunnelType;
 import com.automationcenter.util.LineBuffer;
+import com.automationcenter.util.Utf8StreamDecoder;
 import com.jcraft.jsch.ChannelExec;
 import com.jcraft.jsch.JSch;
 import com.jcraft.jsch.Session;
@@ -11,6 +12,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.ServerSocket;
@@ -182,41 +184,27 @@ public class SshService {
             InputStream stderrStream = channel.getExtInputStream();
             channel.connect();
 
-            StringBuilder stdout = new StringBuilder();
-            StringBuilder stderr = new StringBuilder();
+            // Accumulate RAW bytes and decode UTF-8 once at the end. Decoding each
+            // read() chunk independently would corrupt any multibyte character that
+            // straddles a chunk boundary (JSch streams split at arbitrary byte
+            // positions). For live streaming we use a stateful decoder that carries
+            // an incomplete trailing sequence across chunks.
+            ByteArrayOutputStream stdoutBytes = new ByteArrayOutputStream();
+            ByteArrayOutputStream stderrBytes = new ByteArrayOutputStream();
             LineBuffer lineBuffer = onLine != null ? new LineBuffer(onLine) : null;
+            Utf8StreamDecoder lineDecoder = onLine != null ? new Utf8StreamDecoder() : null;
 
             byte[] buf = new byte[8192];
             long deadline = System.currentTimeMillis() + timeoutSeconds * 1000L;
             boolean timedOut = false;
 
             while (true) {
-                while (stdoutStream.available() > 0) {
-                    int n = stdoutStream.read(buf, 0, buf.length);
-                    if (n < 0) break;
-                    String chunk = new String(buf, 0, n, StandardCharsets.UTF_8);
-                    stdout.append(chunk);
-                    if (lineBuffer != null) lineBuffer.append(chunk);
-                }
-                while (stderrStream.available() > 0) {
-                    int n = stderrStream.read(buf, 0, buf.length);
-                    if (n < 0) break;
-                    stderr.append(new String(buf, 0, n, StandardCharsets.UTF_8));
-                }
+                pumpStdout(stdoutStream, buf, stdoutBytes, lineDecoder, lineBuffer);
+                pumpStderr(stderrStream, buf, stderrBytes);
                 if (channel.isClosed()) {
                     // drain any final bytes
-                    while (stdoutStream.available() > 0) {
-                        int n = stdoutStream.read(buf, 0, buf.length);
-                        if (n < 0) break;
-                        String chunk = new String(buf, 0, n, StandardCharsets.UTF_8);
-                        stdout.append(chunk);
-                        if (lineBuffer != null) lineBuffer.append(chunk);
-                    }
-                    while (stderrStream.available() > 0) {
-                        int n = stderrStream.read(buf, 0, buf.length);
-                        if (n < 0) break;
-                        stderr.append(new String(buf, 0, n, StandardCharsets.UTF_8));
-                    }
+                    pumpStdout(stdoutStream, buf, stdoutBytes, lineDecoder, lineBuffer);
+                    pumpStderr(stderrStream, buf, stderrBytes);
                     break;
                 }
                 if (System.currentTimeMillis() > deadline) {
@@ -226,19 +214,24 @@ public class SshService {
                 Thread.sleep(100);
             }
 
-            if (lineBuffer != null) lineBuffer.flush();
+            if (lineBuffer != null) {
+                lineBuffer.append(lineDecoder.finish()); // flush any trailing partial multibyte
+                lineBuffer.flush();
+            }
+
+            String stdoutText = stdoutBytes.toString(StandardCharsets.UTF_8);
+            String stderrText = stderrBytes.toString(StandardCharsets.UTF_8);
 
             if (timedOut) {
                 channel.disconnect();
-                return new SshCommandResponse(
-                        stdout.toString(),
-                        "Command timed out after " + timeoutSeconds + "s",
-                        -1);
+                String timeoutNote = "Command timed out after " + timeoutSeconds + "s";
+                String combinedErr = stderrText.isEmpty() ? timeoutNote : stderrText + "\n" + timeoutNote;
+                return new SshCommandResponse(stdoutText, combinedErr, -1);
             }
 
             int exitCode = channel.getExitStatus();
             channel.disconnect();
-            return new SshCommandResponse(stdout.toString(), stderr.toString(), exitCode);
+            return new SshCommandResponse(stdoutText, stderrText, exitCode);
 
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -247,6 +240,26 @@ public class SshService {
             return new SshCommandResponse("", e.getMessage(), -1);
         } finally {
             if (session != null) session.disconnect();
+        }
+    }
+
+    /** Drain available stdout bytes into the raw sink and, when streaming, into the line buffer. */
+    private void pumpStdout(InputStream in, byte[] buf, ByteArrayOutputStream sink,
+                           Utf8StreamDecoder decoder, LineBuffer lineBuffer) throws IOException {
+        while (in.available() > 0) {
+            int n = in.read(buf, 0, buf.length);
+            if (n < 0) break;
+            sink.write(buf, 0, n);
+            if (lineBuffer != null) lineBuffer.append(decoder.decode(buf, n));
+        }
+    }
+
+    /** Drain available stderr bytes into the raw sink (no live streaming for stderr). */
+    private void pumpStderr(InputStream in, byte[] buf, ByteArrayOutputStream sink) throws IOException {
+        while (in.available() > 0) {
+            int n = in.read(buf, 0, buf.length);
+            if (n < 0) break;
+            sink.write(buf, 0, n);
         }
     }
 
