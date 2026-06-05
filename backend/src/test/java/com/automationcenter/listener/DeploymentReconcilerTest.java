@@ -9,6 +9,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.OptimisticLockingFailureException;
 
 import java.util.List;
 
@@ -43,5 +44,21 @@ class DeploymentReconcilerTest {
         when(deploymentRepository.findByStatusIn(anyCollection())).thenReturn(List.of());
         reconciler.reconcileOrphans();
         verify(deploymentRepository, never()).save(any());
+    }
+
+    @Test
+    void yieldsToConcurrentlyProcessedDeploymentAndContinues() {
+        // d1 is being re-run by a redelivered job -> its save conflicts; reconciler must
+        // swallow the conflict and still reconcile d2.
+        Deployment d1 = Deployment.builder().status(DeploymentStatus.BUILDING).build();
+        Deployment d2 = Deployment.builder().status(DeploymentStatus.DEPLOYING).build();
+        when(deploymentRepository.findByStatusIn(anyCollection())).thenReturn(List.of(d1, d2));
+        when(deploymentRepository.save(d1)).thenThrow(new OptimisticLockingFailureException("conflict"));
+        when(deploymentRepository.save(d2)).thenReturn(d2);
+
+        assertDoesNotThrow(() -> reconciler.reconcileOrphans());
+
+        verify(deploymentRepository).save(d1); // attempted
+        verify(deploymentRepository).save(d2); // continued past the conflict
     }
 }
