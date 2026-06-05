@@ -137,16 +137,27 @@ public class CicdService {
                     svcStart
             );
 
-            var result = sshService.execute(machine, command);
-            output.append("STDOUT:\n").append(result.getStdout());
+            // Stream install output live with a long timeout so a stalled download
+            // or sudo password prompt is bounded instead of hanging the worker forever.
+            output.append("STDOUT:\n");
+            var result = sshService.execute(machine, command, sshService.longTimeoutSeconds(),
+                    line -> output.append(line).append("\n"));
             if (result.getStderr() != null && !result.getStderr().isBlank()) {
                 output.append("\nSTDERR:\n").append(result.getStderr());
             }
             output.append("\nExit code: ").append(result.getExitCode());
 
-            if (result.getExitCode() == 0) {
+            if (result.getExitCode() != 0) {
+                runnerSetupTracker.fail(sessionId, output.toString());
+                return;
+            }
+            output.append("\nVerifying runner came online on GitHub...");
+            if (waitForRunnerOnline(userId, owner, repo, machineName, 30)) {
+                output.append("\nRunner is online.");
                 runnerSetupTracker.complete(sessionId, output.toString());
             } else {
+                output.append("\nERROR: runner installed but did not come online within 30s. "
+                        + "Check the machine's network and that the service started.");
                 runnerSetupTracker.fail(sessionId, output.toString());
             }
         } catch (Exception e) {
@@ -154,6 +165,28 @@ public class CicdService {
             output.append("ERROR: ").append(e.getMessage());
             runnerSetupTracker.fail(sessionId, output.toString());
         }
+    }
+
+    private boolean waitForRunnerOnline(Long userId, String owner, String repo, String name, int timeoutSec) {
+        long deadline = System.currentTimeMillis() + timeoutSec * 1000L;
+        while (System.currentTimeMillis() < deadline) {
+            try {
+                List<Map<String, Object>> runners = listRunners(userId, owner, repo);
+                boolean online = runners.stream().anyMatch(r ->
+                        name.equalsIgnoreCase(String.valueOf(r.get("name")))
+                                && "online".equalsIgnoreCase(String.valueOf(r.get("status"))));
+                if (online) return true;
+            } catch (Exception e) {
+                log.debug("Runner online-check poll failed: {}", e.getMessage());
+            }
+            try {
+                Thread.sleep(3000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return false;
+            }
+        }
+        return false;
     }
 
     public void rerunWorkflow(Long userId, String owner, String repo, Long runId) {
