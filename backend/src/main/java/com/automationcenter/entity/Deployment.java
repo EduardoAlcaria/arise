@@ -15,6 +15,11 @@ public class Deployment {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    /** JPA optimistic-lock version — prevents concurrent writes (e.g. the startup
+     *  reconciler vs a redelivered deploy) from silently clobbering each other. */
+    @Version
+    private Long lockVersion;
+
     @Column(nullable = false)
     private String name;
 
