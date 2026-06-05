@@ -8,14 +8,17 @@ import java.util.List;
 
 /**
  * Parses `docker compose ps --format json` output and identifies services that
- * are not in a running state. Conservative: blank/unparseable input yields an
- * empty list, so callers never produce a false failure from a missing parse.
+ * are not healthy. A service is healthy when it is running, or when it has exited
+ * cleanly with code 0 (run-once jobs: migrations, seeders, init containers).
+ * Blank/unparseable input yields an empty list — callers decide what an empty
+ * reading means (the deploy health gate treats "no positive reading" as a failure).
  */
 public final class ComposePsParser {
 
     private ComposePsParser() {}
 
-    public record ServiceState(String service, String state) {}
+    /** exitCode is null when docker did not report one (e.g. still running). */
+    public record ServiceState(String service, String state, Integer exitCode) {}
 
     public static List<ServiceState> parse(String output, ObjectMapper mapper) {
         List<ServiceState> result = new ArrayList<>();
@@ -42,8 +45,15 @@ public final class ComposePsParser {
 
     public static List<ServiceState> unhealthy(List<ServiceState> states) {
         return states.stream()
-                .filter(s -> !"running".equalsIgnoreCase(s.state()))
+                .filter(s -> !isHealthy(s))
                 .toList();
+    }
+
+    /** Healthy = running, or exited cleanly with code 0 (run-once containers). */
+    private static boolean isHealthy(ServiceState s) {
+        if ("running".equalsIgnoreCase(s.state())) return true;
+        return "exited".equalsIgnoreCase(s.state())
+                && s.exitCode() != null && s.exitCode() == 0;
     }
 
     private static ServiceState toState(JsonNode node) {
@@ -51,6 +61,7 @@ public final class ComposePsParser {
                 : node.hasNonNull("Name") ? node.get("Name").asText()
                 : "unknown";
         String state = node.hasNonNull("State") ? node.get("State").asText() : "unknown";
-        return new ServiceState(svc, state);
+        Integer exitCode = node.hasNonNull("ExitCode") ? node.get("ExitCode").asInt() : null;
+        return new ServiceState(svc, state, exitCode);
     }
 }
