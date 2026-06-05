@@ -804,7 +804,7 @@ public class DeploymentService {
         for (String dep : missing) {
             if ("apt-get".equals(pkgManager) && !aptUpdated) {
                 appendLog(deployment, "Running apt-get update...", LogLevel.INFO);
-                sshService.execute(machine, "apt-get update -qq 2>&1");
+                sshService.execute(machine, "apt-get update -qq 2>&1", sshService.longTimeoutSeconds());
                 aptUpdated = true;
             }
             var cmds = INSTALL_MAP.get(dep);
@@ -813,7 +813,9 @@ public class DeploymentService {
                 continue;
             }
             appendLog(deployment, "Installing " + dep + "...", LogLevel.INFO);
-            var result = sshService.execute(machine, cmds.get(pkgManager));
+            // Heavy installs (Docker, JDK, node, maven) legitimately exceed the default
+            // 120s timeout — use the long timeout so they are not falsely killed.
+            var result = sshService.execute(machine, cmds.get(pkgManager), sshService.longTimeoutSeconds());
             if (!result.getStdout().isBlank()) appendLog(deployment, result.getStdout(), LogLevel.INFO);
             if (result.getExitCode() != 0) {
                 appendLog(deployment, "Failed to install " + dep + ": " + result.getStderr(), LogLevel.ERROR);
