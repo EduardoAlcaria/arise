@@ -6,6 +6,7 @@ import com.automationcenter.repository.DeploymentRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -37,6 +38,18 @@ class DeploymentReconcilerTest {
         ArgumentCaptor<Deployment> captor = ArgumentCaptor.forClass(Deployment.class);
         verify(deploymentRepository, times(2)).save(captor.capture());
         assertTrue(captor.getAllValues().get(0).getLogs().contains("interrupted by server restart"));
+    }
+
+    @Test
+    void backfillsNullLockVersionsBeforeLoading() {
+        when(deploymentRepository.findByStatusIn(anyCollection())).thenReturn(List.of());
+
+        reconciler.reconcileOrphans();
+
+        // legacy null-version rows must be fixed before any load/save, or startup crashes
+        InOrder order = inOrder(deploymentRepository);
+        order.verify(deploymentRepository).initializeNullLockVersions();
+        order.verify(deploymentRepository).findByStatusIn(anyCollection());
     }
 
     @Test
