@@ -860,20 +860,58 @@ public class DeploymentService {
         }
     }
 
+    private static final long HEALTH_CHECK_TIMEOUT_MS = 60_000;
+    private static final long HEALTH_CHECK_INTERVAL_MS = 3_000;
+
     /**
-     * Inspect running containers via `docker compose ps --format json`.
-     * Returns true if all services are running (or state can't be determined —
-     * conservative, never a false failure). Returns false and logs the offending
-     * services + their recent logs if any service is exited/restarting.
+     * Positively verify container health via `docker compose ps --all --format json`.
+     * A service is healthy when it is running, or has exited cleanly (code 0) — the
+     * run-once pattern. {@code --all} is used so a container that crashed and exited
+     * is actually visible (the default ps omits stopped containers, which would let a
+     * crash slip through as success).
+     *
+     * <p>Fail-closed: returns true ONLY when a probe positively confirms every service
+     * is healthy. Polls up to {@link #HEALTH_CHECK_TIMEOUT_MS} so slow-starting
+     * containers get time to come up. If the probe can never be read (ps errors / empty)
+     * or any service stays unhealthy until the deadline, returns false — health is
+     * never assumed.
      */
     private boolean composeHealthy(Deployment deployment, Machine machine, String repoDir, String composeFileFlag) {
-        var ps = sshService.execute(machine,
-                "cd " + sq(repoDir) + " && docker compose" + composeFileFlag + " ps --format json 2>/dev/null");
-        var states = ComposePsParser.parse(ps.getStdout(), objectMapper);
-        var bad = ComposePsParser.unhealthy(states);
-        if (bad.isEmpty()) return true;
+        String psCmd = "cd " + sq(repoDir) + " && docker compose" + composeFileFlag
+                + " ps --all --format json 2>&1";
+        long deadline = System.currentTimeMillis() + HEALTH_CHECK_TIMEOUT_MS;
+        List<ComposePsParser.ServiceState> lastBad = List.of();
+        String lastProbe = "";
+        int lastExit = -1;
+        boolean gotReading = false;
 
-        for (var svc : bad) {
+        while (true) {
+            var ps = sshService.execute(machine, psCmd);
+            lastProbe = ps.getStdout();
+            lastExit = ps.getExitCode();
+            var states = ComposePsParser.parse(ps.getStdout(), objectMapper);
+            if (ps.getExitCode() == 0 && !states.isEmpty()) {
+                gotReading = true;
+                var bad = ComposePsParser.unhealthy(states);
+                if (bad.isEmpty()) return true; // positively confirmed: all services healthy
+                lastBad = bad;
+            }
+            if (System.currentTimeMillis() >= deadline) break;
+            try {
+                Thread.sleep(HEALTH_CHECK_INTERVAL_MS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+
+        // Never positively confirmed health -> fail closed.
+        if (!gotReading) {
+            appendLog(deployment, "Health check FAILED: could not read container status"
+                    + " (docker compose ps exit " + lastExit + "). Output:\n" + lastProbe, LogLevel.ERROR);
+            return false;
+        }
+        for (var svc : lastBad) {
             appendLog(deployment, "Service '" + svc.service() + "' is " + svc.state()
                     + " — fetching recent logs:", LogLevel.ERROR);
             var logs = sshService.execute(machine,
@@ -882,9 +920,9 @@ public class DeploymentService {
                     sshService.longTimeoutSeconds());
             appendLog(deployment, logs.getStdout(), LogLevel.ERROR);
         }
-        appendLog(deployment, "Health check failed: "
-                + bad.stream().map(ComposePsParser.ServiceState::service).toList()
-                + " not running.", LogLevel.ERROR);
+        appendLog(deployment, "Health check FAILED: "
+                + lastBad.stream().map(ComposePsParser.ServiceState::service).toList()
+                + " not healthy after " + (HEALTH_CHECK_TIMEOUT_MS / 1000) + "s.", LogLevel.ERROR);
         return false;
     }
 
