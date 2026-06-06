@@ -21,6 +21,12 @@ spring:
     port: 5672
     username: automation
     password: automation
+    listener:
+      simple:
+        # A message that errors before our listener's own try/catch (e.g. unconvertible
+        # payload) is discarded instead of being requeued forever. Normal deploy failures
+        # are caught and self-fail; unacked-on-restart redelivery is a separate path.
+        default-requeue-rejected: false
   task:
     execution:
       pool:
