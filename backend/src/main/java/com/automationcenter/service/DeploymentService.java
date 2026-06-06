@@ -104,14 +104,16 @@ public class DeploymentService {
     public void executeAsync(Long deploymentId) {
         Deployment deployment = deploymentRepository.findById(deploymentId)
                 .orElseThrow(() -> new ResourceNotFoundException("Deployment not found: " + deploymentId));
-        // Reload machine from DB to avoid Hibernate LazyInitializationException in async thread
-        Machine machine = machineRepository.findById(deployment.getMachine().getId())
-                .orElseThrow(() -> new ResourceNotFoundException("Machine not found for deployment " + deploymentId));
-        // Fetch owner's GitHub token eagerly to avoid LazyInitializationException in async thread
-        String ownerGithubToken = userRepository.findById(deployment.getOwner().getId())
-                .map(User::getGithubToken).orElse(null);
 
         try {
+            // Reload machine + owner token inside the try so a lookup failure marks the
+            // deployment FAILED rather than escaping the listener and leaving it stuck.
+            // (avoids Hibernate LazyInitializationException in this async thread)
+            Machine machine = machineRepository.findById(deployment.getMachine().getId())
+                    .orElseThrow(() -> new ResourceNotFoundException("Machine not found for deployment " + deploymentId));
+            String ownerGithubToken = userRepository.findById(deployment.getOwner().getId())
+                    .map(User::getGithubToken).orElse(null);
+
             deployment.setStatus(DeploymentStatus.BUILDING);
             deployment.setStartedAt(LocalDateTime.now());
             deploymentRepository.save(deployment);
