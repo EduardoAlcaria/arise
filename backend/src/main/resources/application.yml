@@ -28,6 +28,9 @@ spring:
         max-size: 20
         queue-capacity: 100
       thread-name-prefix: async-
+    scheduling:
+      pool:
+        size: 2
 
 jwt:
   secret: ${JWT_SECRET:YXV0b21hdGlvbmNlbnRlci1qd3Qtc2VjcmV0LWtleS0zMis=}
@@ -54,6 +57,7 @@ encryption:
 ssh:
   command-timeout-seconds: ${SSH_COMMAND_TIMEOUT_SECONDS:120}
   long-command-timeout-seconds: ${SSH_LONG_COMMAND_TIMEOUT_SECONDS:1800}
+  ping-timeout-seconds: ${SSH_PING_TIMEOUT_SECONDS:10}
 
 logging:
   level:
