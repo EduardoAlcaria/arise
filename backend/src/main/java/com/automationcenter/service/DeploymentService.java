@@ -285,10 +285,10 @@ public class DeploymentService {
                 }
             }
 
+            appendLog(deployment, "Deployment completed successfully", LogLevel.INFO);
             deployment.setStatus(DeploymentStatus.SUCCESS);
             deployment.setFinishedAt(LocalDateTime.now());
             deploymentRepository.save(deployment);
-            appendLog(deployment, "Deployment completed successfully", LogLevel.INFO);
             logBroadcaster.complete(deployment.getId());
 
             rabbitTemplate.convertAndSend(
@@ -425,10 +425,10 @@ public class DeploymentService {
                 }
             }
 
+            appendLog(deployment, "Application deployed successfully", LogLevel.INFO);
             deployment.setStatus(DeploymentStatus.SUCCESS);
             deployment.setFinishedAt(LocalDateTime.now());
             deploymentRepository.save(deployment);
-            appendLog(deployment, "Application deployed successfully", LogLevel.INFO);
             logBroadcaster.complete(deployment.getId());
             rabbitTemplate.convertAndSend(RabbitMQConfig.DEPLOYMENT_EXCHANGE,
                     RabbitMQConfig.DEPLOYMENT_ROUTING_KEY, "DEPLOYMENT_SUCCESS:" + deployment.getId());
@@ -607,9 +607,11 @@ public class DeploymentService {
     private void appendLog(Deployment deployment, String message, LogLevel level) {
         if (message == null || message.isBlank()) return;
         logService.save(deployment.getId(), message, level);
+        // Accumulate in memory only; the logs column is persisted at the next status/terminal
+        // save. Saving the whole (growing) entity per line was O(n^2) on verbose builds.
+        // Live consumers read LogEntry rows + the SSE broadcast, not this column.
         String existing = deployment.getLogs() == null ? "" : deployment.getLogs();
         deployment.setLogs(existing + "\n" + message);
-        deploymentRepository.save(deployment);
         logBroadcaster.publish(deployment.getId(), message);
     }
 
