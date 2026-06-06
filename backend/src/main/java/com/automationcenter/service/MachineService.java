@@ -12,6 +12,7 @@ import com.automationcenter.repository.MachineRepository;
 import com.automationcenter.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
@@ -26,6 +27,9 @@ public class MachineService {
     private final MachineRepository machineRepository;
     private final UserRepository userRepository;
     private final SshService sshService;
+
+    @Value("${ssh.ping-timeout-seconds:10}")
+    private long pingTimeoutSeconds;
 
     public MachineResponse create(MachineRequest request, Long ownerId) {
         User owner = userRepository.findById(ownerId)
@@ -97,7 +101,7 @@ public class MachineService {
     }
 
     private boolean ping(Machine machine) {
-        SshCommandResponse response = sshService.execute(machine, "echo ok");
+        SshCommandResponse response = sshService.execute(machine, "echo ok", pingTimeoutSeconds);
         boolean online = response.getExitCode() == 0 && response.getStdout().contains("ok");
         machine.setStatus(online ? MachineStatus.ONLINE : MachineStatus.ERROR);
         if (online) machine.setLastSeen(LocalDateTime.now());
