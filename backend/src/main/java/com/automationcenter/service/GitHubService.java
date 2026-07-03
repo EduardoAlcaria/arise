@@ -17,10 +17,7 @@ import org.springframework.web.reactive.function.client.WebClient;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.Base64;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 @Service
 @RequiredArgsConstructor
@@ -151,7 +148,7 @@ public class GitHubService {
         User user = getUser(userId);
         try {
             @SuppressWarnings("unchecked")
-            Map<String, Object> response = webClientBuilder.build()
+            Optional<Map<String, Object>> response = Optional.ofNullable((Map<String, Object>) webClientBuilder.build()
                     .get()
                     .uri(uriBuilder -> uriBuilder
                             .scheme("https").host("api.github.com")
@@ -162,12 +159,10 @@ public class GitHubService {
                     .header("Accept", "application/vnd.github+json")
                     .retrieve()
                     .bodyToMono(Map.class)
-                    .block();
+                    .block()
+                    .get("content"));
 
-            if (response == null) return "";
-            Object contentObj = response.get("content");
-            if (contentObj == null) return "";
-            String b64 = ((String) contentObj).replaceAll("\\s", "");
+            String b64 = ((String) response).replaceAll("\\s", "");
             return new String(Base64.getDecoder().decode(b64), StandardCharsets.UTF_8);
         } catch (Exception e) {
             log.warn("Could not fetch file {}/{}/{}: {}", owner, repo, path, e.getMessage());
