@@ -22,6 +22,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.yaml.snakeyaml.Yaml;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -205,9 +206,9 @@ public class DeploymentService {
                 var ariseYml = sshService.execute(machine, "cat " + repoDir + "/.arise.yml 2>/dev/null || true");
                 if (ariseYml.getExitCode() == 0 && !ariseYml.getStdout().isBlank()) {
                     try {
-                        org.yaml.snakeyaml.Yaml yaml = new org.yaml.snakeyaml.Yaml();
+                        Yaml yaml = new Yaml();
                         @SuppressWarnings("unchecked")
-                        var ariseData = (java.util.Map<String, Object>) yaml.load(ariseYml.getStdout());
+                        var ariseData = (Map<String, Object>) yaml.load(ariseYml.getStdout());
                         if (ariseData != null && ariseData.get("compose") instanceof String cf) {
                             ariseComposeFile = cf;
                             appendLog(deployment, "Using compose file from .arise.yml: " + ariseComposeFile, LogLevel.INFO);
