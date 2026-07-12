@@ -222,40 +222,44 @@ Indexed on deployment_id and created_at.
 - JwtAuthFilter validates token on every request
 - All endpoints except /api/auth/** and /actuator/** require valid JWT
 - User owns resources — all queries filter by owner_id
-- Private keys stored as plaintext TEXT in DB (TODO: encrypt at rest with AES before prod)
+- Private keys and all provider tokens (GitHub/Cloudflare/Infisical) encrypted at rest with AES-GCM via `AesGcmConverter` (`encryption.secret` env var) — DONE
 - CORS allows localhost:3000 and localhost:5173
 
 ---
 
 ## Remaining Work
 
-### Backend (pending)
-- [ ] RabbitMQConfig — queues for deployment events
-- [ ] GitHubService — list repos/branches via org.kohsuke:github-api
-- [ ] GitHubController — CRUD for GitHub token + repo listing
-- [ ] CloudflareService — zones + tunnel management via Cloudflare REST API (WebClient)
-- [ ] CloudflareController
-- [ ] Stack auto-detection for repo deploys (detect package.json, pom.xml, Dockerfile)
-- [ ] Credential encryption at rest
-- [ ] SSE endpoint for streaming live deployment logs
+> **Status:** the original build plan below is fully shipped. Everything in this
+> section is DONE. For current pending items and the roadmap see
+> `docs/upcoming_feautures.md`.
 
-### Frontend (pending)
-- [ ] Scaffold — npm create vite, TypeScript, React 18
-- [ ] shadcn/ui init + Tailwind
-- [ ] Axios client with JWT interceptor (src/api/client.ts)
-- [ ] Zustand auth store (src/stores/authStore.ts)
-- [ ] Pages: Login, Register
-- [ ] Pages: Dashboard (deployment summary + machine status)
-- [ ] Pages: Machines (list, register, test connection)
-- [ ] Pages: Containers (deploy form, list, stop/restart/remove, logs)
-- [ ] Pages: Deployments (create, list, detail, rollback)
-- [ ] Pages: GitHub (connect token, browse repos)
-- [ ] Pages: Cloudflare (connect token, zones, tunnels)
+### Backend (all done)
+- [x] RabbitMQConfig — queues for deployment events (run / events / hooks)
+- [x] GitHubService — list repos/branches via org.kohsuke:github-api
+- [x] GitHubController — CRUD for GitHub token + repo listing
+- [x] CloudflareService — zones + tunnel management via Cloudflare REST API (WebClient)
+- [x] CloudflareController
+- [x] Stack auto-detection for repo deploys (detect package.json, pom.xml, Dockerfile)
+- [x] Credential encryption at rest (AES-GCM via `AesGcmConverter`)
+- [x] SSE endpoint for streaming live deployment logs (via `LogBroadcaster` pub/sub fan-out)
 
-### Infra (pending)
-- [ ] Dockerfiles for backend and frontend
-- [ ] Add backend + frontend services to docker-compose.yml
-- [ ] application-prod.yml with env-var overrides
+### Frontend (all done)
+- [x] Scaffold — Vite + TypeScript + React 19
+- [x] Tailwind v4 (via `@tailwindcss/vite`)
+- [x] Axios client with JWT interceptor
+- [x] Zustand auth store
+- [x] Pages: Login, Register
+- [x] Pages: Dashboard (deployment summary + machine status)
+- [x] Pages: Machines (list, register, test connection)
+- [x] Pages: Containers (deploy form, list, stop/restart/remove, logs)
+- [x] Pages: Deployments (create, list, detail, rollback)
+- [x] Pages: GitHub (connect token, browse repos)
+- [x] Pages: Cloudflare (connect token, zones, tunnels)
+
+### Infra (all done)
+- [x] Dockerfiles for backend and frontend
+- [x] Add backend + frontend services to docker-compose.yml
+- [x] application-prod.yml with env-var overrides
 
 ---
 
