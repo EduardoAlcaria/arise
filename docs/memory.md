@@ -1,5 +1,8 @@
 # Arise — Project State
-*Last audited: 2026-05-10*
+*Last audited: 2026-07-12*
+*(Factual sections below re-audited against code on this date. The dated
+"Current Work in Progress (2026-05-10)" note near the end is kept as a historical
+snapshot.)*
 
 ---
 
@@ -76,22 +79,23 @@ Self-hosted platform branded **Arise**. Manages remote servers via SSH, deploys 
 
 | Gap | Notes |
 |---|---|
-| **Zero tests** | No unit or integration tests in backend or frontend |
-| **CI/CD frontend page** | `CicdController` is complete; no `/cicd` route or nav item exists in the UI |
-| **Credential encryption** | SSH private keys, GitHub/Cloudflare/Infisical tokens all stored plaintext in DB — build_plan flagged this as "TODO: encrypt at rest with AES before prod" |
+| **No controller / integration tests** | Unit tests exist for helpers (`GitHubServiceAriseConfigTest`, `ComposePsParserTest`, `RunnerSetupTrackerTest`, `DeploymentReconcilerTest`, `LineBufferTest`, `Utf8StreamDecoderTest`). No web-layer / integration tests; the SSH deploy pipeline in `DeploymentService` is not directly tested. |
 | **JWT secret default** | `application.yml` has a hardcoded fallback secret — must be overridden via `JWT_SECRET` env var in production |
+| **`GitHubService.getFileContent`** | `.block().get("content")` unchecked cast can NPE / ClassCastException on an unexpected response; swallowed by a broad catch that returns `""` — a silent failure. |
 
 ---
 
 ## ⚠️ Known Issues / Concerns
 
-**SSE thread leak** — `DeploymentController.streamLogs()` calls `Executors.newSingleThreadExecutor()` per request, creating a new unbounded thread pool each time. Under load this leaks threads. Should use a shared scheduled executor or Spring's `@Async` support.
-
 **Docker TCP requirement** — The Containers page uses `DockerService` which connects to `tcp://host:2375`. The Docker daemon on target machines must have TCP enabled — this is not the default and will silently fail if not configured.
 
 **Duplicate Cloudflare token form** — Cloudflare API token can be saved from both the `/cloudflare` page and the `/settings` page. Minor UX duplication, functionally identical.
 
-**RabbitMQ vs SSE** — RabbitMQ publishes `DEPLOYMENT_SUCCESS/FAILED` events after async runs, but the SSE streaming endpoint independently polls the DB every 1s. The RabbitMQ events may not be consumed anywhere meaningful — worth auditing.
+### Resolved since this audit
+
+**SSE thread leak — FIXED.** `DeploymentController.streamLogs()` no longer spawns a per-request executor. Live logs now go through `LogBroadcaster`, an in-memory pub/sub that fans each `appendLog` line out to all connected `SseEmitter`s for that deployment (with a DB replay on connect). No polling, no per-request thread pool.
+
+**RabbitMQ event consumption — RESOLVED.** `DEPLOYMENT_SUCCESS/FAILED` events are consumed by `DeploymentEventListener`, which broadcasts a WebSocket notification (tabs invalidate their TanStack Query caches) and re-publishes to the hooks exchange, where `PostDeployHookListener` fires the deployment's outbound webhook. Poison messages are dropped, not requeued forever (`default-requeue-rejected: false`).
 
 ---
 
@@ -138,7 +142,9 @@ All 7 tasks were completed and committed:
 ## What's Next (suggested)
 
 1. **Mac Mini SSH connectivity** — decide on the right NAT traversal approach (WireGuard mesh, Cloudflare service token, direct port forward, etc.) and implement it
-2. **Credential encryption** — SSH private keys, GitHub/Cloudflare/Infisical tokens are all stored plaintext in DB; use Infisical as the SSM for secrets instead of raw DB columns (user's stated preference: every env config and credential should go through Infisical)
-3. **CI/CD frontend page** — wire up the existing `/api/cicd` endpoints with a UI
-4. **Fix SSE thread leak** — replace per-request executor with a shared one
-5. **Tests** — at minimum, integration tests for auth + deployment flow
+2. ~~**Credential encryption**~~ — DONE. AES-GCM at rest via `AesGcmConverter` (`encryption.secret`). Optional follow-up: route creds through Infisical instead of DB columns.
+3. ~~**CI/CD frontend page**~~ — DONE. `/cicd` page wired to `/api/cicd`.
+4. ~~**Fix SSE thread leak**~~ — DONE. `LogBroadcaster` pub/sub fan-out.
+5. **Tests** — helper unit tests exist; still missing controller / integration tests for the auth + deployment flow.
+
+For the full forward roadmap see `docs/upcoming_feautures.md`.
