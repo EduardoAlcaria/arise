@@ -161,7 +161,7 @@ JWT_SECRET=your-base64-encoded-secret docker compose up
 5. Each command's stdout/stderr is written as `LogEntry` rows to PostgreSQL and streamed live to the browser via SSE.
 6. On completion, the status is set to `SUCCESS` or `FAILED` and a message is published to `deployment.queue`.
 7. `DeploymentEventListener` consumes the event and broadcasts a `DEPLOYMENT_UPDATE` WebSocket message to all connected browser tabs, which invalidate their TanStack Query caches — the deployment list updates instantly without polling.
-8. On SUCCESS, the event is also published to `hooks.queue` (post-deploy webhook foundation).
+8. On SUCCESS, the event is also published to `hooks.queue`; `PostDeployHookListener` fires the deployment's configured outbound webhook URL.
 
 For **Application** deployments (multi-repo), the platform additionally:
 - Clones each service repository into its own subfolder
@@ -196,5 +196,6 @@ For **Application** deployments (multi-repo), the platform additionally:
 | `GET` | `/api/cloudflare/tunnels` | List Cloudflare tunnels |
 | `POST` | `/api/cloudflare/tunnels` | Create a Cloudflare tunnel |
 | `GET` | `/api/topology` | Infrastructure graph (machines, deployments, tunnels) |
+| `POST` | `/api/webhooks/github/{webhookToken}` | Inbound GitHub push webhook (HMAC-verified) → auto-redeploy matching deployments |
 | `WS` | `/ws/terminal/{machineId}` | Interactive SSH terminal relay |
 | `WS` | `/ws/notifications` | Real-time deployment completion push |
