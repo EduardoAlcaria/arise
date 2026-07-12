@@ -196,11 +196,10 @@ public class DeploymentService {
                 }
             }
 
-            // todo: document how to create and write an .arise,
-            // or decide if it is better to create my own iac, or create a terraform with an notation for arise
-            // if following with the terraform approuch it is best to create a resorse and a iam just for arise,
-            // resource "arise_compose override" "main" {}
-            // Read .arise.yml for deployment hints (compose file override)
+            // Read .arise.yml for deployment hints (compose file override).
+            // Format documented in docs/arise-yml.md.
+            // Future direction (open): a richer IaC manifest or a Terraform notation
+            // for Arise (e.g. resource "arise_compose_override" "main" {}).
             String ariseComposeFile = null;
             if (!isWindows) {
                 var ariseYml = sshService.execute(machine, "cat " + repoDir + "/.arise.yml 2>/dev/null || true");
