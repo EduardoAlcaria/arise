@@ -37,7 +37,8 @@
 ✅ Cloudflare Tunnel creation + DNS automation during deploy
 ✅ DeploymentWatcher — GitHub Actions-style two-panel UI (step sidebar + live log panel)
 ✅ WebSocket push on completion — all browser tabs update without polling
-✅ Post-deploy hooks queue (foundation, placeholder listener)
+✅ Post-deploy webhook — `PostDeployHookListener` fires the deployment's `webhookUrl` on SUCCESS via `hooks.queue`
+✅ Deployment health verification — compose health gate parses `docker compose ps`, fails on crash-loop instead of false SUCCESS
 
 ### Planned
 
@@ -45,11 +46,9 @@
 * Blue/green deployments
 * Canary deployments
 * Deployment approvals
-* Deployment health verification
 * Automatic rollback on failure
 * Deployment dependency graph
 * Environment promotion flows (staging → production)
-* Real webhook invocation for post-deploy hooks
 
 ---
 
@@ -98,10 +97,10 @@
 ✅ File content viewer in-panel
 ✅ Env var key extraction from `.env.example`
 ✅ Runner registration token generation
+✅ Webhook receiver — `POST /api/webhooks/github/{webhookToken}` verifies the GitHub HMAC signature (`X-Hub-Signature-256`) and auto-redeploys matching deployments on push
 
 ### Planned
 
-* Webhook receiver (auto-trigger deploy on push)
 * PR preview environments
 * Commit status updates
 
