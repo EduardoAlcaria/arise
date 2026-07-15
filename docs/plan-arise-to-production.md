@@ -77,7 +77,7 @@ having a test machine. With that, W1→W6 stack safely on top.
 
 ## Workstream 1 — Trust & data safety (blockers for real use)
 
-- [ ] **Wire Infisical secret injection** *(owner priority — currently not set
+- [x] **Wire Infisical secret injection** *(owner priority — currently not set
       up)*. `InfisicalService` can auth + list secrets; connect it to the deploy
       path so a deployment can pull env values from Infisical instead of pasted
       text. Files: `InfisicalService.java`, `DeploymentService` config-write step,
