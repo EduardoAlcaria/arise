@@ -2,9 +2,20 @@ import { useQuery } from '@tanstack/react-query'
 import { getMachines } from '../api/machines'
 import { getContainers } from '../api/containers'
 import { getDeployments } from '../api/deployments'
-import { Server, Box, Rocket, CheckCircle, Plus } from 'lucide-react'
+import { getAuditLog } from '../api/audit'
+import { Server, Box, Rocket, CheckCircle, Plus, Activity } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { OsIcon, StackIcon, StatusDot } from '../components/icons'
+
+function timeAgo(iso: string) {
+  const seconds = Math.floor((Date.now() - new Date(iso).getTime()) / 1000)
+  if (seconds < 60) return `${seconds}s ago`
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h ago`
+  return `${Math.floor(hours / 24)}d ago`
+}
 
 function StatCard({ icon: Icon, label, value, sub, color }: {
   icon: React.ElementType; label: string; value: string | number; sub?: string; color: string
@@ -34,6 +45,7 @@ export default function Dashboard() {
   const { data: machines }    = useQuery({ queryKey: ['machines'], queryFn: getMachines })
   const { data: containers }  = useQuery({ queryKey: ['containers'], queryFn: getContainers })
   const { data: deployments } = useQuery({ queryKey: ['deployments', 0], queryFn: () => getDeployments(0) })
+  const { data: auditLog } = useQuery({ queryKey: ['audit', 0], queryFn: () => getAuditLog(0, 8) })
 
   const onlineMachines    = machines?.filter(m => m.status === 'ONLINE').length ?? 0
   const runningContainers = containers?.filter(c => c.status === 'RUNNING').length ?? 0
@@ -112,6 +124,33 @@ export default function Dashboard() {
             </div>
           )}
         </div>
+      </div>
+
+      {/* Activity feed */}
+      <div className="bg-card border border-border rounded-xl overflow-hidden animate-fade-up mt-4" style={{ animationDelay: '200ms' }}>
+        <div className="flex items-center gap-2 px-5 py-4 border-b border-border">
+          <Activity size={14} className="text-muted-foreground" />
+          <h3 className="text-sm font-semibold text-foreground">Recent Activity</h3>
+        </div>
+        {!auditLog?.content.length ? (
+          <div className="flex flex-col items-center justify-center py-10 text-muted-foreground gap-2">
+            <Activity size={24} className="opacity-25" />
+            <p className="text-sm">No activity yet</p>
+          </div>
+        ) : (
+          <div className="divide-y divide-border">
+            {auditLog.content.map(a => (
+              <div key={a.id} className="flex items-center gap-3 px-5 py-2.5">
+                <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${a.success ? 'status-online' : 'status-error'}`}>
+                  {a.httpMethod}
+                </span>
+                <code className="text-xs font-mono text-foreground flex-1 truncate">{a.path}</code>
+                <span className="text-xs text-muted-foreground shrink-0">{a.username}</span>
+                <span className="text-[11px] text-muted-foreground shrink-0 w-14 text-right">{timeAgo(a.timestamp)}</span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   )
