@@ -65,6 +65,12 @@ ssh:
   long-command-timeout-seconds: ${SSH_LONG_COMMAND_TIMEOUT_SECONDS:1800}
   ping-timeout-seconds: ${SSH_PING_TIMEOUT_SECONDS:10}
 
+backup:
+  directory: ${BACKUP_DIRECTORY:/backups}
+  # Daily at 03:00 server time
+  cron: ${BACKUP_CRON:0 0 3 * * *}
+  retention-count: ${BACKUP_RETENTION_COUNT:7}
+
 logging:
   level:
     com.automationcenter: DEBUG
