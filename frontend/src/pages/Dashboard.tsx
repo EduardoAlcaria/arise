@@ -8,6 +8,7 @@ import { Server, Rocket, CheckCircle, Plus, Activity, AlertTriangle, RotateCcw, 
 import { OsIcon, StackIcon, StatusDot } from '../components/icons'
 import Sparkline from '../components/Sparkline'
 import OnboardingGuide from '../components/OnboardingGuide'
+import { CompactMachineTelemetry } from '../components/MachineTelemetry'
 import type { Deployment } from '../types'
 
 function timeAgo(iso: string) {
@@ -156,6 +157,7 @@ export default function Dashboard() {
                     <p className="text-sm font-medium text-foreground truncate" style={{ fontFamily: "'Fira Code', monospace" }}>{m.host}</p>
                     <p className="text-xs text-muted-foreground truncate">{m.name} · port {m.port}</p>
                   </div>
+                  {m.status === 'ONLINE' && <CompactMachineTelemetry machineId={m.id} />}
                   <div className="flex items-center gap-2">
                     <StatusDot status={m.status} />
                     <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${statusCls(m.status)}`}>{m.status}</span>
