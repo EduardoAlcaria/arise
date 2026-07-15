@@ -128,8 +128,10 @@ having a test machine. With that, W1→W6 stack safely on top.
       graceful zero-fallback silently masked it until I checked the logs.
       Fixed with a pre-built `URI`; cross-verified counts against `rabbitmqctl`
       directly.
-- [ ] **Deploy metrics** — success rate, duration, failure feed (derive from
-      `Deployment` rows).
+- [x] **Deploy metrics** — success rate, duration, failure feed (derive from
+      `Deployment` rows). Success rate + failure feed already shipped in W4;
+      added avg deploy duration (finishedAt − startedAt) as the "Deploys this
+      week" KPI's sub-label.
 
 ---
 
