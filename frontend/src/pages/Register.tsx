@@ -2,7 +2,8 @@ import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { register } from '../api/auth'
 import { useAuthStore } from '../stores/authStore'
-import { AlertCircle, Zap } from 'lucide-react'
+import { Zap } from 'lucide-react'
+import ErrorBanner from '../components/ErrorBanner'
 
 export default function Register() {
   const [name, setName] = useState('')
@@ -39,12 +40,7 @@ export default function Register() {
         <h2 className="text-2xl font-bold text-foreground mb-1">Create account</h2>
         <p className="text-muted-foreground text-sm mb-7">Get started with AutomationCenter</p>
 
-        {error && (
-          <div className="mb-5 p-3 rounded-lg flex items-center gap-2.5 text-sm text-destructive border border-destructive/20 bg-destructive/8">
-            <AlertCircle size={14} className="shrink-0" />
-            {error}
-          </div>
-        )}
+        <ErrorBanner message={error} className="mb-5" />
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
