@@ -148,7 +148,7 @@ public class GitHubService {
         User user = getUser(userId);
         try {
             @SuppressWarnings("unchecked")
-            Optional<Map<String, Object>> response = Optional.ofNullable((Map<String, Object>) webClientBuilder.build()
+            Map<String, Object> response = webClientBuilder.build()
                     .get()
                     .uri(uriBuilder -> uriBuilder
                             .scheme("https").host("api.github.com")
@@ -159,10 +159,13 @@ public class GitHubService {
                     .header("Accept", "application/vnd.github+json")
                     .retrieve()
                     .bodyToMono(Map.class)
-                    .block()
-                    .get("content"));
+                    .block();
 
-            String b64 = ((String) response).replaceAll("\\s", "");
+            Object content = response != null ? response.get("content") : null;
+            if (content == null) {
+                return "";
+            }
+            String b64 = ((String) content).replaceAll("\\s", "");
             return new String(Base64.getDecoder().decode(b64), StandardCharsets.UTF_8);
         } catch (Exception e) {
             log.warn("Could not fetch file {}/{}/{}: {}", owner, repo, path, e.getMessage());
