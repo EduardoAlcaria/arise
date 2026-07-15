@@ -170,6 +170,7 @@ export default function Deployments() {
           tunnelName: item.tunnelName, tunnelHostname: item.tunnelHostname, tunnelAppPort: item.tunnelAppPort,
           configFiles: item.configFiles,
           webhookUrl: item.webhookUrl,
+          infisicalEnvironment: item.infisicalEnvironment, infisicalSecretPath: item.infisicalSecretPath,
         })
         if (!first) first = dep
       }
@@ -187,6 +188,7 @@ export default function Deployments() {
         services: payload.services, configFiles: payload.configFiles,
         tunnelName: payload.tunnelName, tunnelHostname: payload.tunnelHostname, tunnelAppPort: payload.tunnelAppPort,
         webhookUrl: payload.webhookUrl,
+        infisicalEnvironment: payload.infisicalEnvironment, infisicalSecretPath: payload.infisicalSecretPath,
       })
       qc.invalidateQueries({ queryKey: ['deployments-all'] })
       setShowWizard(false)
