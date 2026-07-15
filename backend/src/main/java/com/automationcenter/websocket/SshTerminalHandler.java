@@ -8,6 +8,8 @@ import com.automationcenter.service.MachineService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.automationcenter.service.SshService;
+import com.automationcenter.util.SecretRedactor;
+import com.automationcenter.util.Utf8StreamDecoder;
 import com.jcraft.jsch.ChannelShell;
 import com.jcraft.jsch.Session;
 import lombok.RequiredArgsConstructor;
@@ -103,15 +105,18 @@ public class SshTerminalHandler extends AbstractWebSocketHandler {
 
             SESSIONS.put(ws.getId(), new TerminalSession(jschSession, channel, stdinSink));
 
-            // Forward SSH stdout → WebSocket
+            // Forward SSH stdout → WebSocket, redacting known secret shapes as text flows
+            // through (best-effort — a live PTY stream can't be fully sanitized).
             Thread reader = new Thread(() -> {
                 byte[] buf = new byte[4096];
+                Utf8StreamDecoder decoder = new Utf8StreamDecoder();
                 try {
                     int n;
                     while (!channel.isClosed() && (n = stdout.read(buf)) != -1) {
-                        if (ws.isOpen()) {
+                        String text = SecretRedactor.redact(decoder.decode(buf, n));
+                        if (!text.isEmpty() && ws.isOpen()) {
                             synchronized (ws) {
-                                ws.sendMessage(new BinaryMessage(buf, 0, n, true));
+                                ws.sendMessage(new BinaryMessage(text.getBytes(StandardCharsets.UTF_8)));
                             }
                         }
                     }
