@@ -405,6 +405,8 @@ export default function GitHub() {
         tunnelName: item.tunnelName,
         tunnelHostname: item.tunnelHostname,
         tunnelAppPort: item.tunnelAppPort,
+        infisicalEnvironment: item.infisicalEnvironment,
+        infisicalSecretPath: item.infisicalSecretPath,
       })
       if (!first) first = dep
     }
@@ -425,6 +427,8 @@ export default function GitHub() {
       tunnelName: payload.tunnelName,
       tunnelHostname: payload.tunnelHostname,
       tunnelAppPort: payload.tunnelAppPort,
+      infisicalEnvironment: payload.infisicalEnvironment,
+      infisicalSecretPath: payload.infisicalSecretPath,
     })
     qc.invalidateQueries({ queryKey: ['deployments-repo'] })
     qc.invalidateQueries({ queryKey: ['deployments', 0] })
