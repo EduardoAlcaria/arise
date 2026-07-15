@@ -3,6 +3,7 @@ package com.automationcenter.service;
 import com.automationcenter.entity.AuditEntry;
 import com.automationcenter.entity.User;
 import com.automationcenter.repository.AuditEntryRepository;
+import com.automationcenter.util.SecretRedactor;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -61,7 +62,7 @@ public class AuditAspect {
                     .httpMethod(httpMethod)
                     .path(path)
                     .success(success)
-                    .errorMessage(errorMessage)
+                    .errorMessage(SecretRedactor.redact(errorMessage))
                     .build());
         } catch (Exception e) {
             log.warn("Failed to persist audit entry for {} {}: {}", httpMethod, path, e.getMessage());
