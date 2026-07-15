@@ -3,7 +3,8 @@ import { useQuery, useMutation } from '@tanstack/react-query'
 import { connectInfisical, getInfisicalStatus } from '../api/infisical'
 import { saveCloudflareToken, getCloudflareStatus } from '../api/cloudflare'
 import { getWebhookToken } from '../api/settings'
-import { Database, Check, AlertTriangle, Loader2, Link2Off, Cloud, Key, Webhook, Copy } from 'lucide-react'
+import { Database, Check, Loader2, Link2Off, Cloud, Key, Webhook, Copy } from 'lucide-react'
+import ErrorBanner, { errorMessage } from '../components/ErrorBanner'
 
 export default function Settings() {
   // Infisical state
@@ -207,10 +208,7 @@ export default function Settings() {
             </div>
 
             {saveCfMut.isError && (
-              <div className="flex gap-2 items-center rounded-lg px-3 py-2 text-xs text-destructive border border-destructive/20 bg-destructive/5">
-                <AlertTriangle size={12} className="shrink-0" />
-                {(saveCfMut.error as any)?.response?.data?.message ?? (saveCfMut.error as any)?.message ?? 'Failed to save'}
-              </div>
+              <ErrorBanner message={errorMessage(saveCfMut.error, 'Failed to save')} />
             )}
 
             {cfSaveSuccess && (
@@ -321,10 +319,7 @@ export default function Settings() {
             </div>
 
             {connectMut.isError && (
-              <div className="flex gap-2 items-center rounded-lg px-3 py-2 text-xs text-destructive border border-destructive/20 bg-destructive/5">
-                <AlertTriangle size={12} className="shrink-0" />
-                {(connectMut.error as any)?.response?.data?.message ?? (connectMut.error as any)?.message ?? 'Failed to connect'}
-              </div>
+              <ErrorBanner message={errorMessage(connectMut.error, 'Failed to connect')} />
             )}
 
             {infisicalSaveSuccess && (
