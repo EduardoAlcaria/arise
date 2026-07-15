@@ -14,6 +14,7 @@ import {
   AlertTriangle, Loader2, RefreshCw, Plus, X, CheckCircle, Network,
   Activity, Key, Pencil, LogIn, ExternalLink, Copy, Search, Zap,
 } from 'lucide-react'
+import ErrorBanner, { errorMessage } from '../components/ErrorBanner'
 import {
   ReactFlow, Background, BackgroundVariant, Controls, MiniMap, Panel,
   Handle, Position, useNodesState, useEdgesState, MarkerType,
@@ -135,10 +136,7 @@ function SsoLoginModal({ account, onClose }: { account: AwsAccountResponse; onCl
           )}
 
           {mut.isError && (
-            <div className="flex gap-2 items-start rounded-lg px-3 py-2 text-xs text-destructive border border-destructive/20 bg-destructive/5">
-              <AlertTriangle size={12} className="shrink-0 mt-0.5" />
-              {(mut.error as any)?.response?.data?.message ?? (mut.error as any)?.message ?? 'Failed to start SSO login'}
-            </div>
+            <ErrorBanner message={errorMessage(mut.error, 'Failed to start SSO login')} />
           )}
 
           {mut.data && (
@@ -230,10 +228,7 @@ function RegisterModal({ onClose, editing }: { onClose: () => void; editing?: Aw
           </div>
 
           {mut.isError && (
-            <div className="flex gap-2 items-center rounded-lg px-3 py-2 text-xs text-destructive border border-destructive/20 bg-destructive/5">
-              <AlertTriangle size={12} className="shrink-0" />
-              {(mut.error as any)?.response?.data?.message ?? (mut.error as any)?.message ?? (isEdit ? 'Failed to update' : 'Failed to register')}
-            </div>
+            <ErrorBanner message={errorMessage(mut.error, isEdit ? 'Failed to update' : 'Failed to register')} />
           )}
 
           <div className="flex justify-end gap-2 pt-1">
