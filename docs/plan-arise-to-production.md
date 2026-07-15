@@ -28,6 +28,33 @@ auth, webhook HMAC — are untested. Fixing this is Workstream 0 below.
 
 ---
 
+## Foundation milestone — "base redonda" (what must be true before building the rest)
+
+W0 alone is only half the base. A solid foundation = *works reliably* **and** *can
+be changed without breaking*. Concretely, the base is round when all three hold:
+
+1. **Can change without breaking (W0)** — `mvnw` wrapper, GitHub Actions CI,
+   Vitest on the front, controller (`@WebMvcTest`) + `DeploymentService` pipeline
+   tests (happy path / health-gate FAILED / tunnel-fail-stays-SUCCESS) with a
+   mocked `SshService`.
+2. **Core loop verified** — one real E2E proof: repo → machine → `compose up` →
+   SUCCESS, plus a rollback, a redeploy, and a webhook push→redeploy.
+   ⚠️ **Needs a reachable SSH target machine.** Unit tests mock SSH; real E2E does
+   not. This is the practical blocker — without a test machine the base does not
+   fully close.
+3. **Doesn't look broken (subset of W7)** — loading skeletons (kills the `0/0`
+   flash), a standard error state (Login/Register have almost none), and the
+   `GitHubService.getFileContent` silent-failure fix.
+
+Explicitly **out** of the foundation (they build *on top*, later): Infisical
+wiring, DB/volume backup, teams/RBAC, observability, Tauri. Order inside the
+milestone: `mvnw → CI → tests (mock) → polish + bug fix → E2E on a real machine`.
+
+Answer to "does this give a base to continue on?": **yes**, conditional on item 2
+having a test machine. With that, W1→W6 stack safely on top.
+
+---
+
 ## Workstream 0 — Testability & CI (do first; unblocks everything)
 
 - [ ] **Add a Maven wrapper** (`mvnw`/`mvnw.cmd`) so the build runs without a
