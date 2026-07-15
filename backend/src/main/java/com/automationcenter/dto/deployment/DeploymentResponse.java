@@ -26,6 +26,8 @@ public class DeploymentResponse {
     private String deployDir;
     private String resolvedCommitSha;
     private String webhookUrl;
+    private String infisicalEnvironment;
+    private String infisicalSecretPath;
     private Long machineId;
     private String machineName;
     private Long ownerId;
