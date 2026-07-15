@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react'
 import { X, Eye, EyeOff, Search, GitBranch, Loader2, ChevronRight, ChevronLeft, Check, AlertTriangle, Lock, Rocket, Plus, Trash2, Layers, FolderOpen, KeyRound, Database, Cloud } from 'lucide-react'
 import { saveGitHubToken, getRepos, getBranches, getRepoEnvVars, getAriseConfig } from '../api/github'
 import type { AriseConfig } from '../api/github'
-import { getInfisicalStatus, getInfisicalSecrets } from '../api/infisical'
+import { getInfisicalStatus } from '../api/infisical'
 import { getCloudflareStatus } from '../api/cloudflare'
 import type { AppServiceItem, ConfigFileItem } from '../api/deployments'
 import type { GitHubRepo, GitHubBranch } from '../types'
@@ -23,6 +23,8 @@ export interface DeployItem {
   tunnelName?: string; tunnelHostname?: string; tunnelAppPort?: number
   configFiles?: ConfigFileItem[]
   webhookUrl?: string
+  infisicalEnvironment?: string
+  infisicalSecretPath?: string
 }
 export interface AppDeployPayload {
   name: string
@@ -33,6 +35,8 @@ export interface AppDeployPayload {
   tunnelHostname?: string
   tunnelAppPort?: number
   webhookUrl?: string
+  infisicalEnvironment?: string
+  infisicalSecretPath?: string
 }
 
 interface Props {
@@ -86,8 +90,8 @@ export default function DeployRepoWizard({
   const [cloudflareConfigured, setCloudflareConfigured] = useState(false)
   const [infisicalModalOpen, setInfisicalModalOpen] = useState(false)
   const [infisicalEnv, setInfisicalEnv] = useState('dev')
-  const [loadingInfisical, setLoadingInfisical] = useState(false)
-  const [infisicalError, setInfisicalError] = useState('')
+  const [infisicalSecretPath, setInfisicalSecretPath] = useState('/')
+  const [envSource, setEnvSource] = useState<'manual' | 'infisical'>('manual')
 
   useEffect(() => {
     if (isConnected) loadReposFromBackend()
@@ -273,10 +277,14 @@ export default function DeployRepoWizard({
   }
 
   const buildEnvFileConfigItem = (): ConfigFileItem | null => {
-    if (envVarKeys.length === 0) return null
+    if (envSource !== 'manual' || envVarKeys.length === 0) return null
     const lines = envVarKeys.map(k => `${k}=${envVars[k] ?? ''}`).join('\n')
     return { path: '.env', content: lines }
   }
+
+  const infisicalFields = envSource === 'infisical'
+    ? { infisicalEnvironment: infisicalEnv.trim(), infisicalSecretPath: infisicalSecretPath.trim() || '/' }
+    : {}
 
   const handleDeploy = async () => {
     if (!machineId) { setDeployError('Please select a machine'); return }
@@ -293,6 +301,7 @@ export default function DeployRepoWizard({
         name: deployNames.get(sel.repo.fullName) || sel.repo.name,
         machineId,
         ...tunnelFields,
+        ...infisicalFields,
         configFiles: allConfigs.length > 0 ? allConfigs : undefined,
         webhookUrl: webhookUrl.trim() || undefined,
       }))
@@ -314,6 +323,7 @@ export default function DeployRepoWizard({
           tunnelHostname: tunnelHostname.trim(),
           tunnelAppPort,
         }),
+        ...infisicalFields,
         webhookUrl: webhookUrl.trim() || undefined,
       }
       try { await onAppDeploy(payload) } catch (e: any) { setDeployError(e.message || 'Deployment failed') }
@@ -344,26 +354,9 @@ export default function DeployRepoWizard({
     if (folderInputRef.current) folderInputRef.current.value = ''
   }
 
-  const handleLoadFromInfisical = async () => {
-    setLoadingInfisical(true)
-    setInfisicalError('')
-    try {
-      const secrets = await getInfisicalSecrets(infisicalEnv)
-      setEnvVars(prev => {
-        const next = { ...prev }
-        for (const s of secrets) {
-          if (envVarKeys.includes(s.secretName)) {
-            next[s.secretName] = s.secretValue
-          }
-        }
-        return next
-      })
-      setInfisicalModalOpen(false)
-    } catch (e: any) {
-      setInfisicalError(e.message || 'Failed to load secrets')
-    } finally {
-      setLoadingInfisical(false)
-    }
+  const confirmInfisicalSource = () => {
+    setEnvSource('infisical')
+    setInfisicalModalOpen(false)
   }
 
   const filteredRepos = repos.filter(r => r.fullName.toLowerCase().includes(repoSearch.toLowerCase()))
@@ -617,29 +610,43 @@ export default function DeployRepoWizard({
                           Environment Variables ({envVarKeys.length})
                         </span>
                       </div>
-                      {infisicalConnected && (
+                      {infisicalConnected && envSource === 'manual' && (
                         <button
                           onClick={() => setInfisicalModalOpen(true)}
                           className="flex items-center gap-1.5 text-[11px] text-primary hover:opacity-80 transition-opacity font-semibold"
                         >
-                          <Database size={11} /> Load from Infisical
+                          <Database size={11} /> Pull from Infisical
                         </button>
                       )}
                     </div>
-                    <div className="flex flex-col gap-2">
-                      {envVarKeys.map(key => (
-                        <div key={key} className="flex items-center gap-2">
-                          <code className="text-[11px] font-mono text-muted-foreground w-2/5 truncate shrink-0">{key}</code>
-                          <input
-                            className="input-field mono text-xs flex-1"
-                            style={{ paddingTop: '4px', paddingBottom: '4px', height: '28px' }}
-                            placeholder={`value for ${key}`}
-                            value={envVars[key] ?? ''}
-                            onChange={e => setEnvVars(prev => ({ ...prev, [key]: e.target.value }))}
-                          />
-                        </div>
-                      ))}
-                    </div>
+                    {envSource === 'infisical' ? (
+                      <div className="flex items-center justify-between gap-2 rounded-lg border border-primary/20 bg-primary/5 px-3 py-2">
+                        <span className="text-xs text-foreground">
+                          Pulled live from Infisical (<code className="font-mono">{infisicalEnv}</code>{infisicalSecretPath !== '/' ? <> at <code className="font-mono">{infisicalSecretPath}</code></> : null}) at deploy time — values are never sent from your browser.
+                        </span>
+                        <button
+                          onClick={() => setEnvSource('manual')}
+                          className="text-[11px] text-muted-foreground hover:text-foreground shrink-0 underline"
+                        >
+                          Switch to manual
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col gap-2">
+                        {envVarKeys.map(key => (
+                          <div key={key} className="flex items-center gap-2">
+                            <code className="text-[11px] font-mono text-muted-foreground w-2/5 truncate shrink-0">{key}</code>
+                            <input
+                              className="input-field mono text-xs flex-1"
+                              style={{ paddingTop: '4px', paddingBottom: '4px', height: '28px' }}
+                              placeholder={`value for ${key}`}
+                              value={envVars[key] ?? ''}
+                              onChange={e => setEnvVars(prev => ({ ...prev, [key]: e.target.value }))}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 ) : null
               )}
@@ -1074,7 +1081,7 @@ export default function DeployRepoWizard({
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2">
                 <Database size={16} className="text-muted-foreground" />
-                <h3 className="font-semibold text-foreground text-sm">Load from Infisical</h3>
+                <h3 className="font-semibold text-foreground text-sm">Pull secrets from Infisical</h3>
               </div>
               <button onClick={() => setInfisicalModalOpen(false)} className="text-muted-foreground hover:text-foreground">
                 <X size={16} />
@@ -1087,22 +1094,25 @@ export default function DeployRepoWizard({
               value={infisicalEnv}
               onChange={e => setInfisicalEnv(e.target.value)}
             />
-            {infisicalError && (
-              <div className="flex gap-2 items-center rounded-lg px-3 py-2 mb-3 text-xs text-destructive border border-destructive/20 bg-destructive/5">
-                <AlertTriangle size={12} className="shrink-0" />{infisicalError}
-              </div>
-            )}
+            <label className="block text-[11px] font-semibold text-muted-foreground mb-1.5 uppercase tracking-widest">Secret path</label>
+            <input
+              className="input-field mb-4 mono"
+              placeholder="/"
+              value={infisicalSecretPath}
+              onChange={e => setInfisicalSecretPath(e.target.value)}
+            />
             <p className="text-xs text-muted-foreground mb-4 leading-relaxed">
-              Secrets from Infisical matching your detected variable names will be auto-filled. You can override them manually after.
+              Secrets are pulled directly from Infisical on the target machine at deploy time (and on every redeploy) —
+              values never pass through your browser or get stored in Arise.
             </p>
             <div className="flex gap-2">
               <button onClick={() => setInfisicalModalOpen(false)}
                 className="flex-1 py-2 border border-border text-foreground text-sm rounded-lg hover:bg-muted transition-colors">
                 Cancel
               </button>
-              <button onClick={handleLoadFromInfisical} disabled={loadingInfisical || !infisicalEnv.trim()}
+              <button onClick={confirmInfisicalSource} disabled={!infisicalEnv.trim()}
                 className="flex-1 flex items-center justify-center gap-2 py-2 bg-primary text-primary-foreground text-sm font-semibold rounded-lg hover:opacity-90 disabled:opacity-50 transition-all">
-                {loadingInfisical ? <><Loader2 size={13} className="animate-spin" />Loading…</> : <>Load secrets</>}
+                Use Infisical
               </button>
             </div>
           </div>
