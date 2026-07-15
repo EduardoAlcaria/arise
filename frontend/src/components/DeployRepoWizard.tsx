@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { X, Eye, EyeOff, Search, GitBranch, Loader2, ChevronRight, ChevronLeft, Check, AlertTriangle, Lock, Rocket, Plus, Trash2, Layers, FolderOpen, KeyRound, Database, Cloud } from 'lucide-react'
+import ErrorBanner from '../components/ErrorBanner'
 import { saveGitHubToken, getRepos, getBranches, getRepoEnvVars, getAriseConfig } from '../api/github'
 import type { AriseConfig } from '../api/github'
 import { getInfisicalStatus } from '../api/infisical'
@@ -434,11 +435,7 @@ export default function DeployRepoWizard({
                   {showPat ? <EyeOff size={14} /> : <Eye size={14} />}
                 </button>
               </div>
-              {patError && (
-                <div className="flex gap-2 items-start rounded-lg px-3 py-2 mb-3.5 text-xs text-destructive border border-destructive/20 bg-destructive/5">
-                  <AlertTriangle size={12} className="shrink-0 mt-0.5" />{patError}
-                </div>
-              )}
+              <ErrorBanner message={patError} className="mb-3.5" />
               <p className="text-xs text-muted-foreground mb-5 leading-relaxed">
                 <a href="https://github.com/settings/tokens/new" target="_blank" rel="noreferrer"
                   className="underline underline-offset-2 hover:text-foreground transition-colors">Create a token</a>
@@ -860,11 +857,7 @@ export default function DeployRepoWizard({
                 <p className="text-[11px] text-muted-foreground mt-1">Called via HTTP POST on deployment success.</p>
               </div>
 
-              {deployError && (
-                <div className="flex gap-2 items-center rounded-lg px-3 py-2 mb-3 text-xs text-destructive border border-destructive/20 bg-destructive/5">
-                  <AlertTriangle size={12} className="shrink-0" />{deployError}
-                </div>
-              )}
+              <ErrorBanner message={deployError} className="mb-3" />
             </div>
           )}
 
@@ -1029,11 +1022,7 @@ export default function DeployRepoWizard({
                 <p className="text-[11px] text-muted-foreground mt-1">Called via HTTP POST on deployment success.</p>
               </div>
 
-              {deployError && (
-                <div className="flex gap-2 items-center rounded-lg px-3 py-2 text-xs text-destructive border border-destructive/20 bg-destructive/5">
-                  <AlertTriangle size={12} className="shrink-0" />{deployError}
-                </div>
-              )}
+              <ErrorBanner message={deployError} />
             </div>
           )}
         </div>
