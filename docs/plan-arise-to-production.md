@@ -127,15 +127,23 @@ having a test machine. With that, W1→W6 stack safely on top.
 
 Rebuild `pages/Dashboard.tsx` from "4 cards + 2 lists" into a live cockpit:
 
-- [ ] **Loading skeletons** (kills the `0/0` flash) — do this repo-wide, not just
-      here.
-- [ ] KPI row with **sparklines** (deploys/day, success rate, active tunnels,
-      machines online).
+- [x] **Loading skeletons** (kills the `0/0` flash) — do this repo-wide, not just
+      here. Dashboard (the named offender) rebuilt with `isLoading`-gated
+      skeletons; AWS.tsx EC2/ECS/S3 header counts and CiCd.tsx repo-selector
+      message fixed too. Settings.tsx's status badges are a blank-gap (not a
+      wrong-value flash) — left as is, lower priority.
+- [x] KPI row with **sparklines** (deploys/day, success rate, active tunnels,
+      machines online). Sparklines only render for deploys/day and success rate
+      (real 7-day history from existing deployment rows) — active tunnels and
+      machines online are current-snapshot values with no history table yet, so
+      no sparkline is fabricated for them (needs Workstream 3 telemetry).
 - [ ] **Machine health tiles** (CPU/RAM/disk — needs Workstream 3).
-- [ ] **Failure feed** with one-click view-logs / redeploy.
+- [x] **Failure feed** with one-click view-logs / redeploy.
 - [ ] **Queue depth** widget.
-- [ ] **Activity timeline** (from the audit log).
-- [ ] Defer the 3D globe indefinitely.
+- [x] **Activity timeline** (from the audit log). Already shipped as the
+      "Recent Activity" panel in Workstream 1.
+- [x] Defer the 3D globe indefinitely. Nothing to defer — no 3D globe exists in
+      the codebase (only a `Globe` lucide icon for tunnel nodes in Topology).
 
 ---
 
