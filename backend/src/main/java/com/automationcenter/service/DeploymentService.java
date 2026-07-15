@@ -12,6 +12,7 @@ import com.automationcenter.entity.*;
 import com.automationcenter.exception.ResourceNotFoundException;
 import com.automationcenter.repository.DeploymentRepository;
 import com.automationcenter.repository.UserRepository;
+import com.automationcenter.util.SecretRedactor;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -169,9 +170,9 @@ public class DeploymentService {
                     : "rm -rf " + repoDir + " && git clone " + sq(cloneUrl) + " -b " + sq(deployment.getBranch()) + " " + repoDir;
             appendLog(deployment, "Cloning repository: " + deployment.getRepositoryUrl(), LogLevel.INFO);
             var cloneResult = sshService.execute(machine, cloneCmd, sshService.longTimeoutSeconds(),
-                    line -> appendLog(deployment, sanitizeGitOutput(line), LogLevel.INFO));
+                    line -> appendLog(deployment, line, LogLevel.INFO));
             if (cloneResult.getExitCode() != 0) {
-                appendLog(deployment, "Clone failed: " + sanitizeGitOutput(cloneResult.getStderr()), LogLevel.ERROR);
+                appendLog(deployment, "Clone failed: " + cloneResult.getStderr(), LogLevel.ERROR);
                 fail(deployment);
                 return;
             }
@@ -370,9 +371,9 @@ public class DeploymentService {
                 String cloneCmd = "rm -rf " + sq(serviceDir) + " && git clone " + sq(repoUrl) + " -b " + sq(branch) + " " + sq(serviceDir);
                 appendLog(deployment, "Cloning service " + safeName, LogLevel.INFO);
                 var cloneResult = sshService.execute(machine, cloneCmd);
-                appendLog(deployment, sanitizeGitOutput(cloneResult.getStdout()), LogLevel.INFO);
+                appendLog(deployment, cloneResult.getStdout(), LogLevel.INFO);
                 if (cloneResult.getExitCode() != 0) {
-                    appendLog(deployment, "Clone failed for " + safeName + ": " + sanitizeGitOutput(cloneResult.getStderr()), LogLevel.ERROR);
+                    appendLog(deployment, "Clone failed for " + safeName + ": " + cloneResult.getStderr(), LogLevel.ERROR);
                     fail(deployment);
                     return;
                 }
@@ -632,8 +633,9 @@ public class DeploymentService {
         logBroadcaster.complete(deployment.getId());
     }
 
-    private void appendLog(Deployment deployment, String message, LogLevel level) {
-        if (message == null || message.isBlank()) return;
+    private void appendLog(Deployment deployment, String rawMessage, LogLevel level) {
+        if (rawMessage == null || rawMessage.isBlank()) return;
+        String message = SecretRedactor.redact(rawMessage);
         logService.save(deployment.getId(), message, level);
         // Accumulate in memory only; the logs column is persisted at the next status/terminal
         // save. Saving the whole (growing) entity per line was O(n^2) on verbose builds.
@@ -984,12 +986,6 @@ public class DeploymentService {
                 + lastBad.stream().map(ComposePsParser.ServiceState::service).toList()
                 + " not healthy after " + (healthCheckTimeoutMs / 1000) + "s.", LogLevel.ERROR);
         return false;
-    }
-
-    /** Strip embedded GitHub tokens from git output before logging. */
-    private static String sanitizeGitOutput(String s) {
-        if (s == null) return "";
-        return s.replaceAll("https://[^@]+@github\\.com/", "https://github.com/");
     }
 
     private String getBuildCommand(String stack, String repoDir, boolean isWindows, String composeFile) {
