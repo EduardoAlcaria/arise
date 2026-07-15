@@ -109,6 +109,16 @@ export interface Page<T> {
   size: number
 }
 
+export interface AuditEntry {
+  id: number
+  username: string
+  httpMethod: string
+  path: string
+  success: boolean
+  errorMessage: string | null
+  timestamp: string
+}
+
 export interface ApiError {
   status: number
   message: string
