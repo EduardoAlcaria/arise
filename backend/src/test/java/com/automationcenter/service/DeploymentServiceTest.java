@@ -40,6 +40,7 @@ class DeploymentServiceTest {
     @Mock private CloudflareService cloudflareService;
     @Mock private LogBroadcaster logBroadcaster;
     @Mock private InfisicalService infisicalService;
+    @Mock private VolumeBackupService volumeBackupService;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -55,7 +56,7 @@ class DeploymentServiceTest {
     void setUp() {
         service = new DeploymentService(deploymentRepository, userRepository, machineService,
                 machineRepository, sshService, logService, rabbitTemplate, objectMapper,
-                cloudflareService, logBroadcaster, infisicalService);
+                cloudflareService, logBroadcaster, infisicalService, volumeBackupService);
         // Real 60s/3s polling would make the health-gate test take a full minute; shrink it.
         ReflectionTestUtils.setField(service, "healthCheckTimeoutMs", 200L);
         ReflectionTestUtils.setField(service, "healthCheckIntervalMs", 40L);
