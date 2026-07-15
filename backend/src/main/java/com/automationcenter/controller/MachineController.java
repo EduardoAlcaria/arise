@@ -1,5 +1,6 @@
 package com.automationcenter.controller;
 
+import com.automationcenter.dto.machine.MachineMetricResponse;
 import com.automationcenter.dto.machine.MachineRequest;
 import com.automationcenter.dto.machine.MachineResponse;
 import com.automationcenter.dto.machine.SshCommandRequest;
@@ -65,5 +66,15 @@ public class MachineController {
             @RequestBody @Valid SshCommandRequest request,
             @AuthenticationPrincipal User user) {
         return ResponseEntity.ok(machineService.exec(id, request.getCommand(), user.getId()));
+    }
+
+    @GetMapping("/{id}/metrics")
+    public ResponseEntity<List<MachineMetricResponse>> metrics(@PathVariable Long id, @AuthenticationPrincipal User user) {
+        List<MachineMetricResponse> response = machineService.getMetrics(id, user.getId()).stream()
+                .map(m -> new MachineMetricResponse(
+                        m.getCpuLoad(), m.getMemUsedMb(), m.getMemTotalMb(),
+                        m.getDiskUsedMb(), m.getDiskTotalMb(), m.getTimestamp()))
+                .toList();
+        return ResponseEntity.ok(response);
     }
 }
