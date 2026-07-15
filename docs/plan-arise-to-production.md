@@ -121,8 +121,13 @@ having a test machine. With that, W1→W6 stack safely on top.
 - [x] **Telemetry tiles + sparklines** on Machines + Dashboard. Full CPU/RAM/disk
       tiles with sparklines on Machines cards; compact current-value readout on
       Dashboard's machine rows.
-- [ ] **RabbitMQ queue-depth** panel via the management API (pending/running
-      deploys).
+- [x] **RabbitMQ queue-depth** panel via the management API (pending/running
+      deploys). Caught and fixed a real bug along the way: WebClient's
+      `.uri(String)` re-encodes an already-percent-encoded URL, turning the
+      vhost separator `%2F` into `%252F` and 404ing every request — the
+      graceful zero-fallback silently masked it until I checked the logs.
+      Fixed with a pre-built `URI`; cross-verified counts against `rabbitmqctl`
+      directly.
 - [ ] **Deploy metrics** — success rate, duration, failure feed (derive from
       `Deployment` rows).
 
