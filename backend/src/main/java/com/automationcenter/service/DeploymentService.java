@@ -7,6 +7,7 @@ import com.automationcenter.dto.deployment.AppServiceDto;
 import com.automationcenter.dto.deployment.ConfigFileDto;
 import com.automationcenter.dto.deployment.DeploymentRequest;
 import com.automationcenter.dto.deployment.DeploymentResponse;
+import com.automationcenter.dto.infisical.InfisicalSecret;
 import com.automationcenter.entity.*;
 import com.automationcenter.exception.ResourceNotFoundException;
 import com.automationcenter.repository.DeploymentRepository;
@@ -44,6 +45,7 @@ public class DeploymentService {
     private final ObjectMapper objectMapper;
     private final CloudflareService cloudflareService;
     private final LogBroadcaster logBroadcaster;
+    private final InfisicalService infisicalService;
 
     @Value("${deploy.health-check-timeout-ms:60000}")
     private long healthCheckTimeoutMs = 60_000;
@@ -93,6 +95,10 @@ public class DeploymentService {
         if (request.getWebhookUrl() != null && !request.getWebhookUrl().isBlank()) {
             builder.webhookUrl(request.getWebhookUrl());
         }
+        if (request.getInfisicalEnvironment() != null && !request.getInfisicalEnvironment().isBlank()) {
+            builder.infisicalEnvironment(request.getInfisicalEnvironment())
+                    .infisicalSecretPath(request.getInfisicalSecretPath());
+        }
         Deployment deployment = deploymentRepository.save(builder.build());
         final Long deploymentId = deployment.getId();
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
@@ -119,8 +125,8 @@ public class DeploymentService {
             // (avoids Hibernate LazyInitializationException in this async thread)
             Machine machine = machineRepository.findById(deployment.getMachine().getId())
                     .orElseThrow(() -> new ResourceNotFoundException("Machine not found for deployment " + deploymentId));
-            String ownerGithubToken = userRepository.findById(deployment.getOwner().getId())
-                    .map(User::getGithubToken).orElse(null);
+            User owner = userRepository.findById(deployment.getOwner().getId()).orElse(null);
+            String ownerGithubToken = owner != null ? owner.getGithubToken() : null;
 
             deployment.setStatus(DeploymentStatus.BUILDING);
             deployment.setStartedAt(LocalDateTime.now());
@@ -128,7 +134,7 @@ public class DeploymentService {
             appendLog(deployment, "Starting deployment: " + deployment.getName(), LogLevel.INFO);
 
             if (deployment.getType() == DeploymentType.APPLICATION) {
-                executeApplicationDeploy(deployment, machine, ownerGithubToken);
+                executeApplicationDeploy(deployment, machine, owner);
                 return;
             }
 
@@ -201,6 +207,10 @@ public class DeploymentService {
                 } else {
                     appendLog(deployment, "Config file injection not supported for Windows targets — skipping", LogLevel.WARN);
                 }
+            }
+
+            if (!isWindows) {
+                injectInfisicalEnv(deployment, machine, owner, repoDir);
             }
 
             // Read .arise.yml for deployment hints (compose file override).
@@ -315,7 +325,8 @@ public class DeploymentService {
         }
     }
 
-    private void executeApplicationDeploy(Deployment deployment, Machine machine, String ownerGithubToken) {
+    private void executeApplicationDeploy(Deployment deployment, Machine machine, User owner) {
+        String ownerGithubToken = owner != null ? owner.getGithubToken() : null;
         try {
             List<AppServiceDto> services = deployment.getApplicationServices() != null
                     ? objectMapper.readValue(deployment.getApplicationServices(), new TypeReference<>() {})
@@ -377,6 +388,8 @@ public class DeploymentService {
                     return;
                 }
             }
+
+            injectInfisicalEnv(deployment, machine, owner, baseDir);
 
             deployment.setStatus(DeploymentStatus.DEPLOYING);
             deploymentRepository.save(deployment);
@@ -563,6 +576,10 @@ public class DeploymentService {
             builder.tunnelName(source.getTunnelName())
                    .tunnelHostname(source.getTunnelHostname())
                    .tunnelAppPort(source.getTunnelAppPort());
+        // Carry over Infisical env source (secrets are re-pulled fresh on execute, never stored)
+        if (source.getInfisicalEnvironment() != null)
+            builder.infisicalEnvironment(source.getInfisicalEnvironment())
+                   .infisicalSecretPath(source.getInfisicalSecretPath());
 
         Deployment deployment = deploymentRepository.save(builder.build());
         executeAsync(deployment.getId());
@@ -624,6 +641,37 @@ public class DeploymentService {
         String existing = deployment.getLogs() == null ? "" : deployment.getLogs();
         deployment.setLogs(existing + "\n" + message);
         logBroadcaster.publish(deployment.getId(), message);
+    }
+
+    /**
+     * Pulls secrets live from Infisical (when the deployment has an environment configured)
+     * and writes them as a .env file in the deploy directory. Never persisted to the
+     * deployments table — fetched fresh on every deploy/redeploy. Non-fatal on failure:
+     * the deployment continues (matches the tunnel-failure graceful-degradation pattern).
+     */
+    private void injectInfisicalEnv(Deployment deployment, Machine machine, User owner, String targetDir) {
+        String environment = deployment.getInfisicalEnvironment();
+        if (environment == null || environment.isBlank() || owner == null) return;
+        String secretPath = deployment.getInfisicalSecretPath() != null && !deployment.getInfisicalSecretPath().isBlank()
+                ? deployment.getInfisicalSecretPath() : "/";
+
+        appendLog(deployment, "Pulling secrets from Infisical (" + environment + ")", LogLevel.INFO);
+        List<InfisicalSecret> secrets = infisicalService.listSecrets(
+                owner.getId(), owner.getInfisicalProjectId(), environment, secretPath);
+        if (secrets.isEmpty()) {
+            appendLog(deployment, "No secrets returned from Infisical for " + environment + " — skipping .env write", LogLevel.WARN);
+            return;
+        }
+
+        String envContent = secrets.stream()
+                .map(s -> s.getSecretName() + "=" + s.getSecretValue())
+                .collect(java.util.stream.Collectors.joining("\n"));
+        var writeResult = sshService.writeFileViaShell(machine, targetDir + "/.env", envContent);
+        if (writeResult.getExitCode() != 0) {
+            appendLog(deployment, "Failed to write Infisical .env: " + writeResult.getStderr(), LogLevel.WARN);
+            return;
+        }
+        appendLog(deployment, "Wrote " + secrets.size() + " secret(s) from Infisical to .env", LogLevel.INFO);
     }
 
     private String detectStack(Machine machine, String repoDir, boolean isWindows) {
@@ -996,6 +1044,8 @@ public class DeploymentService {
                 .deployDir(d.getDeployDir())
                 .resolvedCommitSha(d.getResolvedCommitSha())
                 .webhookUrl(d.getWebhookUrl())
+                .infisicalEnvironment(d.getInfisicalEnvironment())
+                .infisicalSecretPath(d.getInfisicalSecretPath())
                 .machineId(d.getMachine() != null ? d.getMachine().getId() : null)
                 .machineName(d.getMachine() != null ? d.getMachine().getName() : null)
                 .ownerId(d.getOwner().getId())
