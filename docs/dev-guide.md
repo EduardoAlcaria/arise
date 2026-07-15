@@ -434,6 +434,32 @@ Schema is managed by Hibernate `ddl-auto=update` — it creates/updates tables o
 
 **Gotcha:** `deleteByDeploymentId` in `LogEntryRepository` is a derived delete query — the calling service method must be `@Transactional`.
 
+### 9.1 Backups
+
+`BackupService` runs `pg_dump` on a schedule (`backup.cron`, default `0 0 3 * * *` — daily at
+03:00) and writes a timestamped custom-format dump to `backup.directory` (default `/backups`,
+mounted as the `db_backups` volume in `docker-compose.yml`). It keeps the newest
+`backup.retention-count` dumps (default 7) and deletes older ones. All three are overridable via
+`BACKUP_CRON`, `BACKUP_DIRECTORY`, `BACKUP_RETENTION_COUNT` env vars.
+
+The backend image installs `postgresql-client-16` (matching the `postgres:16` compose service)
+via the official PGDG apt repo so `pg_dump`/`pg_restore` match the server's major version.
+
+**Restore** (run against a running `postgres` container/host — this drops and recreates objects
+in `automation_db`, so stop the `backend` service first to avoid writes during restore):
+
+```bash
+docker cp automation_db-20260715-030000.dump <postgres-container>:/tmp/restore.dump
+docker exec -it <postgres-container> pg_restore -U automation_user -d automation_db \
+  --clean --if-exists /tmp/restore.dump
+```
+
+Or from a machine with `pg_restore` and network access to the DB port:
+
+```bash
+pg_restore -h <host> -p 5432 -U automation_user -d automation_db --clean --if-exists automation_db-20260715-030000.dump
+```
+
 ---
 
 ## 10. Production infrastructure (Mac Mini)
