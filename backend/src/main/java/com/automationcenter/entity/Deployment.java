@@ -60,6 +60,10 @@ public class Deployment {
     @Column(columnDefinition = "TEXT")
     private String webhookUrl;
 
+    /** When set, env vars are pulled live from Infisical at each deploy instead of stored config text. */
+    private String infisicalEnvironment;
+    private String infisicalSecretPath;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "machine_id")
     private Machine machine;
