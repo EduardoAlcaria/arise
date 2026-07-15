@@ -1,6 +1,7 @@
 package com.automationcenter.service;
 
 import com.automationcenter.config.RabbitMQConfig;
+import com.automationcenter.dto.infisical.InfisicalSecret;
 import com.automationcenter.dto.machine.SshCommandResponse;
 import com.automationcenter.entity.*;
 import com.automationcenter.repository.DeploymentRepository;
@@ -15,6 +16,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -37,6 +39,7 @@ class DeploymentServiceTest {
     @Mock private RabbitTemplate rabbitTemplate;
     @Mock private CloudflareService cloudflareService;
     @Mock private LogBroadcaster logBroadcaster;
+    @Mock private InfisicalService infisicalService;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -52,7 +55,7 @@ class DeploymentServiceTest {
     void setUp() {
         service = new DeploymentService(deploymentRepository, userRepository, machineService,
                 machineRepository, sshService, logService, rabbitTemplate, objectMapper,
-                cloudflareService, logBroadcaster);
+                cloudflareService, logBroadcaster, infisicalService);
         // Real 60s/3s polling would make the health-gate test take a full minute; shrink it.
         ReflectionTestUtils.setField(service, "healthCheckTimeoutMs", 200L);
         ReflectionTestUtils.setField(service, "healthCheckIntervalMs", 40L);
@@ -78,6 +81,7 @@ class DeploymentServiceTest {
         lenient().when(sshService.execute(any(Machine.class), anyString(), anyLong())).thenReturn(ok);
         lenient().when(sshService.execute(any(Machine.class), anyString(), anyLong(), any())).thenReturn(ok);
         lenient().when(sshService.longTimeoutSeconds()).thenReturn(1800L);
+        lenient().when(sshService.writeFileViaShell(any(Machine.class), anyString(), anyString())).thenReturn(ok);
 
         // .arise.yml absent
         lenient().when(sshService.execute(any(Machine.class), argThat(cmd -> cmd != null && cmd.contains(".arise.yml"))))
@@ -128,5 +132,18 @@ class DeploymentServiceTest {
 
         assertThat(deployment.getStatus()).isEqualTo(DeploymentStatus.SUCCESS);
         verify(cloudflareService, never()).deleteTunnel(anyLong(), anyString());
+    }
+
+    @Test
+    void executeAsyncWritesEnvFileFromInfisicalWhenConfigured() {
+        deployment.setInfisicalEnvironment("dev");
+        stubComposeHealth("[{\"Service\":\"web\",\"State\":\"running\"}]");
+        when(infisicalService.listSecrets(eq(OWNER_ID), any(), eq("dev"), eq("/")))
+                .thenReturn(List.of(new InfisicalSecret("API_KEY", "s3cr3t")));
+
+        service.executeAsync(DEPLOYMENT_ID);
+
+        assertThat(deployment.getStatus()).isEqualTo(DeploymentStatus.SUCCESS);
+        verify(sshService).writeFileViaShell(eq(machine), eq("/tmp/deploy_" + DEPLOYMENT_ID + "/.env"), eq("API_KEY=s3cr3t"));
     }
 }
