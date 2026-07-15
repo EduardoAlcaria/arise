@@ -179,7 +179,12 @@ Rebuild `pages/Dashboard.tsx` from "4 cards + 2 lists" into a live cockpit:
       .java:151` — unchecked cast → `""`). Turned out to be a genuine compile
       error (cast `Optional<Map<...>>` to `String`) masked until now because
       nothing ever ran `mvn compile` locally — fixed while unblocking W0.
-- [ ] Standardize an **error state** component; Login/Register have almost none.
+- [x] Standardize an **error state** component; Login/Register have almost none.
+      Extracted `ErrorBanner` (9 duplicate inline destructive-boxes across 6
+      files replaced). Also found and fixed the real reason Login/Register
+      "had almost none": the axios response interceptor force-redirected to
+      `/login` on *any* 401 — including the login endpoint's own bad-credentials
+      response — wiping the error before React could render it.
 - [ ] Split monster files: `pages/AWS.tsx` (1478 LOC),
       `components/DeployRepoWizard.tsx` (1113 LOC).
 - [ ] Onboarding / first-run empty-state guide.
