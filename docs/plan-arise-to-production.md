@@ -112,10 +112,15 @@ having a test machine. With that, W1→W6 stack safely on top.
 
 ## Workstream 3 — Observability
 
-- [ ] **Machine telemetry over SSH** — on the existing 60s ping in
+- [x] **Machine telemetry over SSH** — on the existing 60s ping in
       `MachineService.pingAll`, also sample `top`/`free`/`df` and store a rolling
-      window. New `MachineMetric` entity (or in-memory ring + Redis).
-- [ ] **Telemetry tiles + sparklines** on Machines + Dashboard.
+      window. New `MachineMetric` entity (or in-memory ring + Redis). Used a
+      portable OS-detecting script (load average instead of raw %CPU — no `top`
+      parsing needed on either Linux or macOS); 200-sample retention per machine.
+      Verified end-to-end against the real Mac Mini over SSH.
+- [x] **Telemetry tiles + sparklines** on Machines + Dashboard. Full CPU/RAM/disk
+      tiles with sparklines on Machines cards; compact current-value readout on
+      Dashboard's machine rows.
 - [ ] **RabbitMQ queue-depth** panel via the management API (pending/running
       deploys).
 - [ ] **Deploy metrics** — success rate, duration, failure feed (derive from
