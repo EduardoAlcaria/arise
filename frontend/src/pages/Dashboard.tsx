@@ -4,7 +4,8 @@ import { getMachines } from '../api/machines'
 import { getDeployments, redeployDeployment } from '../api/deployments'
 import { getAuditLog } from '../api/audit'
 import { getGitHubUser } from '../api/github'
-import { Server, Rocket, CheckCircle, Plus, Activity, AlertTriangle, RotateCcw, FileText, Radio } from 'lucide-react'
+import { getQueueMetrics } from '../api/queueMetrics'
+import { Server, Rocket, CheckCircle, Plus, Activity, AlertTriangle, RotateCcw, FileText, Radio, ListOrdered } from 'lucide-react'
 import { OsIcon, StackIcon, StatusDot } from '../components/icons'
 import Sparkline from '../components/Sparkline'
 import OnboardingGuide from '../components/OnboardingGuide'
@@ -69,6 +70,12 @@ function statusCls(status: string) {
   return 'status-muted'
 }
 
+const QUEUE_LABELS: Record<string, string> = {
+  'deployment.run.queue': 'Deploy jobs',
+  'deployment.queue': 'Deploy events',
+  'hooks.queue': 'Post-deploy hooks',
+}
+
 export default function Dashboard() {
   const navigate = useNavigate()
   const qc = useQueryClient()
@@ -79,6 +86,7 @@ export default function Dashboard() {
   })
   const { data: auditLog, isLoading: auditLoading } = useQuery({ queryKey: ['audit', 0], queryFn: () => getAuditLog(0, 8) })
   const { data: githubUser, isLoading: githubLoading } = useQuery({ queryKey: ['github-user'], queryFn: getGitHubUser })
+  const { data: queues } = useQuery({ queryKey: ['queue-metrics'], queryFn: getQueueMetrics, refetchInterval: 15_000 })
 
   const redeployMut = useMutation({
     mutationFn: redeployDeployment,
@@ -133,6 +141,27 @@ export default function Dashboard() {
           <StatCard icon={Server} label="Machines Online" value={`${onlineMachines}/${machines?.length ?? 0}`} color="bg-accent/15 text-accent" />
         )}
       </div>
+
+      {/* Queue depth */}
+      {!!queues?.length && (
+        <div className="bg-card border border-border rounded-xl overflow-hidden animate-fade-up mb-6">
+          <div className="flex items-center gap-2 px-5 py-4 border-b border-border">
+            <ListOrdered size={14} className="text-muted-foreground" />
+            <h3 className="text-sm font-semibold text-foreground">Queue Depth</h3>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 divide-y sm:divide-y-0 sm:divide-x divide-border">
+            {queues.map(q => (
+              <div key={q.queueName} className="px-5 py-3 flex items-center justify-between">
+                <span className="text-xs text-muted-foreground">{QUEUE_LABELS[q.queueName] ?? q.queueName}</span>
+                <span className="text-xs font-mono text-foreground">
+                  <span title="pending">{q.ready}</span> pending
+                  {q.unacknowledged > 0 && <> · <span title="running">{q.unacknowledged}</span> running</>}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Two-column overview */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
