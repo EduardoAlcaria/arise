@@ -149,9 +149,11 @@ Rebuild `pages/Dashboard.tsx` from "4 cards + 2 lists" into a live cockpit:
       (real 7-day history from existing deployment rows) — active tunnels and
       machines online are current-snapshot values with no history table yet, so
       no sparkline is fabricated for them (needs Workstream 3 telemetry).
-- [ ] **Machine health tiles** (CPU/RAM/disk — needs Workstream 3).
+- [x] **Machine health tiles** (CPU/RAM/disk — needs Workstream 3). Shipped as
+      part of Workstream 3's telemetry tiles/sparklines item.
 - [x] **Failure feed** with one-click view-logs / redeploy.
-- [ ] **Queue depth** widget.
+- [x] **Queue depth** widget. Shipped as part of Workstream 3's RabbitMQ
+      queue-depth item.
 - [x] **Activity timeline** (from the audit log). Already shipped as the
       "Recent Activity" panel in Workstream 1.
 - [x] Defer the 3D globe indefinitely. Nothing to defer — no 3D globe exists in
