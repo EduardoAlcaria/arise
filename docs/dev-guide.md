@@ -460,6 +460,34 @@ Or from a machine with `pg_restore` and network access to the DB port:
 pg_restore -h <host> -p 5432 -U automation_user -d automation_db --clean --if-exists automation_db-20260715-030000.dump
 ```
 
+### 9.2 Per-deployment volume backups
+
+`VolumeBackupService` runs `restic backup` against a deployment's `deployDir` on the target
+machine before `redeploy`/`rollback` overwrite it — so a bad deploy doesn't destroy the only
+copy of whatever state lives there. Non-fatal: a backup failure is logged and the
+redeploy/rollback proceeds anyway (same philosophy as the tunnel/Infisical failure handling in
+`DeploymentService`).
+
+- Scope: bind-mount-style data under `deployDir`. It does **not** enumerate separately-named
+  Docker volumes (`/var/lib/docker/volumes/...`) — add a `docker volume inspect` pass per
+  service if that turns out to matter more than bind mounts in practice.
+- Repository: `$HOME/.arise-backups/<deploymentId>` on the **same machine** as the deployment
+  — protects against a bad deploy, not a disk failure. Point `RESTIC_REPOSITORY` at an S3/SFTP
+  backend instead if off-machine retention is needed.
+- Restic itself is installed on first use (static binary from GitHub releases) if not already
+  present; the repo's encryption password is generated once per deployment and stored
+  AES-GCM-encrypted on the `Deployment` row (`resticRepoPassword`).
+- Retention: `restic forget --keep-last 5 --prune` after each successful backup.
+
+**Restore** (run on the target machine, or any host with `restic` and SSH/network access to it):
+
+```bash
+export RESTIC_REPOSITORY=$HOME/.arise-backups/<deploymentId>
+export RESTIC_PASSWORD=<decrypt resticRepoPassword from the deployments table>
+restic snapshots                      # list available snapshots
+restic restore latest --target /path/to/restore/into
+```
+
 ---
 
 ## 10. Production infrastructure (Mac Mini)
