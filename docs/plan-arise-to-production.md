@@ -190,8 +190,12 @@ Rebuild `pages/Dashboard.tsx` from "4 cards + 2 lists" into a live cockpit:
 - [x] Onboarding / first-run empty-state guide. `OnboardingGuide` on the
       Dashboard: 3-step checklist (machine, GitHub, deploy) that auto-hides
       once all three are done.
-- [ ] Delete stale merged remote branches (`feat/env-injection`, `feat/live-logs`,
-      `feat/real-rollback`, `feat/redeploy`, `feat/topology`).
+- [x] Delete stale merged remote branches (`feat/env-injection`, `feat/live-logs`,
+      `feat/real-rollback`, `feat/redeploy`, `feat/topology`). git showed "no
+      merge base" with main (history was rewritten at some point) so ancestry
+      couldn't confirm merge status directly — verified instead that all the
+      features they added are present and working in current main, then deleted
+      with user confirmation.
 
 ---
 
