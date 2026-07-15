@@ -87,7 +87,7 @@ having a test machine. With that, W1→W6 stack safely on top.
       `@Scheduled`.
 - [ ] **Per-deployment volume backup** — restic/borg over SSH before a redeploy /
       rollback, so data survives a bad deploy.
-- [ ] **Audit log** — `AuditEntry` entity + an interceptor/aspect on mutating
+- [x] **Audit log** — `AuditEntry` entity + an interceptor/aspect on mutating
       endpoints (who/what/when). Surface it in the Dashboard activity feed.
 - [ ] **Secret redaction audit** — extend the existing `sanitizeGitOutput`
       approach to audit logs, SSE, and the terminal relay; grep for token leakage.
