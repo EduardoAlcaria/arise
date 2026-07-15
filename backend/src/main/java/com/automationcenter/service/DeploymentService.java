@@ -47,6 +47,7 @@ public class DeploymentService {
     private final CloudflareService cloudflareService;
     private final LogBroadcaster logBroadcaster;
     private final InfisicalService infisicalService;
+    private final VolumeBackupService volumeBackupService;
 
     @Value("${deploy.health-check-timeout-ms:60000}")
     private long healthCheckTimeoutMs = 60_000;
@@ -528,6 +529,7 @@ public class DeploymentService {
         Machine machine = deployment.getMachine();
 
         if (deployment.getDeployDir() != null && machine != null) {
+            volumeBackupService.backupBeforeRollback(deployment, machine);
             appendLog(deployment, "Rolling back: stopping containers in " + deployment.getDeployDir(), LogLevel.INFO);
             try {
                 String downCmd = "cd " + deployment.getDeployDir() + " && docker compose down 2>&1";
@@ -551,6 +553,10 @@ public class DeploymentService {
         Deployment source = findByIdAndOwner(sourceId, ownerId);
         User owner = userRepository.findById(ownerId).orElseThrow();
         Machine machine = source.getMachine();
+
+        if (source.getDeployDir() != null && machine != null) {
+            volumeBackupService.backupBeforeRedeploy(source, machine);
+        }
 
         Deployment.DeploymentBuilder builder = Deployment.builder()
                 .name(source.getName())
