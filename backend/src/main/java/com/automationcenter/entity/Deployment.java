@@ -64,6 +64,11 @@ public class Deployment {
     private String infisicalEnvironment;
     private String infisicalSecretPath;
 
+    /** Restic repository encryption password, generated on first volume backup for this deployment. */
+    @Convert(converter = com.automationcenter.converter.AesGcmConverter.class)
+    @Column(columnDefinition = "TEXT")
+    private String resticRepoPassword;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "machine_id")
     private Machine machine;
