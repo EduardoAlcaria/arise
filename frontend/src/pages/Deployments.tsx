@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { useLocation } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { getDeployments, createDeployment, rollbackDeployment, redeployDeployment, addDeploymentTunnel, deleteDeployment, removeDeploymentTunnel } from '../api/deployments'
 import type { Deployment } from '../types'
@@ -84,6 +85,7 @@ interface TunnelModalState {
 
 export default function Deployments() {
   const qc = useQueryClient()
+  const location = useLocation()
   const [showWizard, setShowWizard] = useState(false)
   const [search, setSearch] = useState('')
   const [isDeploying, setIsDeploying] = useState(false)
@@ -107,6 +109,12 @@ export default function Deployments() {
     queryKey: ['deployments-all'],
     queryFn: () => getDeployments(0, 200),
   })
+
+  // Deep-link from Dashboard's failure feed: navigate('/deployments', { state: { openId, openName } })
+  useEffect(() => {
+    const state = location.state as { openId?: number; openName?: string } | null
+    if (state?.openId) setWatching({ id: state.openId, name: state.openName ?? '' })
+  }, [location.state])
   const { data: machines } = useQuery({ queryKey: ['machines'], queryFn: getMachines })
   const rollbackMut = useMutation({
     mutationFn: rollbackDeployment,
