@@ -38,6 +38,11 @@ spring:
       pool:
         size: 2
 
+rabbitmq:
+  # RabbitMQ's HTTP management API — a different port/protocol from the AMQP
+  # connection above, used to read queue depth for the Dashboard widget.
+  management-port: ${RABBITMQ_MANAGEMENT_PORT:15672}
+
 jwt:
   secret: ${JWT_SECRET:YXV0b21hdGlvbmNlbnRlci1qd3Qtc2VjcmV0LWtleS0zMis=}
   expiration: 86400000
