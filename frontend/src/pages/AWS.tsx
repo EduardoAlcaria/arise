@@ -1067,7 +1067,7 @@ function VpcDetail({
 
       <div style={{ marginBottom: 24 }}>
         <div style={{ fontSize: 11, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>
-          EC2 Instances ({instances.length})
+          EC2 Instances {!ec2Loading && `(${instances.length})`}
         </div>
         {ec2Loading && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#64748b', fontSize: 13, padding: '12px 0' }}>
@@ -1136,7 +1136,7 @@ function VpcDetail({
 
       <div>
         <div style={{ fontSize: 11, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>
-          ECS Clusters ({clusters?.length ?? 0})
+          ECS Clusters {!ecsLoading && `(${clusters?.length ?? 0})`}
         </div>
         {ecsLoading && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#64748b', fontSize: 13, padding: '12px 0' }}>
@@ -1183,7 +1183,7 @@ function GlobalDetail({ accountId, region }: { accountId: number; region: string
 
       <div>
         <div style={{ fontSize: 11, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>
-          S3 Buckets ({buckets?.length ?? 0})
+          S3 Buckets {!s3Loading && `(${buckets?.length ?? 0})`}
         </div>
         {s3Loading
           ? <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#64748b', fontSize: 13 }}><Loader2 size={14} className="animate-spin" />Loading…</div>
