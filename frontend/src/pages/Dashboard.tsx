@@ -3,9 +3,11 @@ import { useNavigate, Link } from 'react-router-dom'
 import { getMachines } from '../api/machines'
 import { getDeployments, redeployDeployment } from '../api/deployments'
 import { getAuditLog } from '../api/audit'
+import { getGitHubUser } from '../api/github'
 import { Server, Rocket, CheckCircle, Plus, Activity, AlertTriangle, RotateCcw, FileText, Radio } from 'lucide-react'
 import { OsIcon, StackIcon, StatusDot } from '../components/icons'
 import Sparkline from '../components/Sparkline'
+import OnboardingGuide from '../components/OnboardingGuide'
 import type { Deployment } from '../types'
 
 function timeAgo(iso: string) {
@@ -75,6 +77,7 @@ export default function Dashboard() {
     queryKey: ['deployments', 0, 100], queryFn: () => getDeployments(0, 100),
   })
   const { data: auditLog, isLoading: auditLoading } = useQuery({ queryKey: ['audit', 0], queryFn: () => getAuditLog(0, 8) })
+  const { data: githubUser, isLoading: githubLoading } = useQuery({ queryKey: ['github-user'], queryFn: getGitHubUser })
 
   const redeployMut = useMutation({
     mutationFn: redeployDeployment,
@@ -100,8 +103,18 @@ export default function Dashboard() {
 
   const viewLogs = (d: Deployment) => navigate('/deployments', { state: { openId: d.id, openName: d.name } })
 
+  const onboardingLoading = machinesLoading || githubLoading || deploymentsLoading
+  const hasMachine = (machines?.length ?? 0) > 0
+  const hasGithub = !!githubUser
+  const hasDeployment = (deployments?.content.length ?? 0) > 0
+  const showOnboarding = !onboardingLoading && !(hasMachine && hasGithub && hasDeployment)
+
   return (
     <div className="p-6 max-w-6xl mx-auto">
+      {showOnboarding && (
+        <OnboardingGuide hasMachine={hasMachine} hasGithub={hasGithub} hasDeployment={hasDeployment} />
+      )}
+
       {/* KPI row */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6 stagger">
         {deploymentsLoading ? <StatCardSkeleton /> : (
