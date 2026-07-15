@@ -5,8 +5,9 @@ import { getDeployments, createDeployment, rollbackDeployment, redeployDeploymen
 import type { Deployment } from '../types'
 import { getMachines } from '../api/machines'
 import { getGitHubUser, type GHUser } from '../api/github'
-import { Plus, RotateCcw, RefreshCw, FileText, X, Search, Rocket, ChevronDown, ChevronRight, Radio, Cloud, ExternalLink, AlertTriangle, Loader2, Trash2, CloudOff } from 'lucide-react'
+import { Plus, RotateCcw, RefreshCw, FileText, X, Search, Rocket, ChevronDown, ChevronRight, Radio, Cloud, ExternalLink, Loader2, Trash2, CloudOff } from 'lucide-react'
 import { StackIcon, StatusDot } from '../components/icons'
+import ErrorBanner, { errorMessage } from '../components/ErrorBanner'
 import DeployRepoWizard, { type DeployItem, type AppDeployPayload } from '../components/DeployRepoWizard'
 import DeploymentWatcher from '../components/DeploymentWatcher'
 
@@ -517,11 +518,7 @@ export default function Deployments() {
                 <p className="text-[11px] text-muted-foreground mt-1">The port your application listens on inside the machine.</p>
               </div>
 
-              {tunnelError && (
-                <div className="flex gap-2 items-start rounded-lg px-3 py-2.5 text-xs text-destructive border border-destructive/20 bg-destructive/5">
-                  <AlertTriangle size={12} className="shrink-0 mt-0.5" />{tunnelError}
-                </div>
-              )}
+              <ErrorBanner message={tunnelError} />
 
               <div className="flex gap-2 pt-1">
                 <button
@@ -566,10 +563,7 @@ export default function Deployments() {
                 : 'This will delete the Cloudflare tunnel and DNS record. The running cloudflared container on the machine will not be stopped automatically.'}
             </p>
             {(deleteMut.isError || removeTunnelMut.isError) && (
-              <div className="flex gap-2 items-center rounded-lg px-3 py-2 text-xs text-destructive border border-destructive/20 bg-destructive/5 mb-3">
-                <AlertTriangle size={12} className="shrink-0" />
-                {((deleteMut.error ?? removeTunnelMut.error) as any)?.response?.data?.message ?? 'Operation failed'}
-              </div>
+              <ErrorBanner message={errorMessage(deleteMut.error ?? removeTunnelMut.error, 'Operation failed')} className="mb-3" />
             )}
             <div className="flex gap-2">
               <button
