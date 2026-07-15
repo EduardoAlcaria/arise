@@ -16,7 +16,11 @@ client.interceptors.request.use((config) => {
 client.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401 || error.response?.status === 403) {
+    // Login/register 401s are the form's own "bad credentials" response, not an
+    // expired session — let the page's own catch block show that error instead
+    // of force-reloading to /login before it can render.
+    const isAuthEndpoint = error.config?.url?.includes('/auth/login') || error.config?.url?.includes('/auth/register')
+    if (!isAuthEndpoint && (error.response?.status === 401 || error.response?.status === 403)) {
       useAuthStore.getState().logout()
       window.location.href = '/login'
     }
