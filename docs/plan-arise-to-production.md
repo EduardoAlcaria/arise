@@ -82,7 +82,7 @@ having a test machine. With that, W1→W6 stack safely on top.
       path so a deployment can pull env values from Infisical instead of pasted
       text. Files: `InfisicalService.java`, `DeploymentService` config-write step,
       `DeployRepoWizard.tsx` (source = Infisical option).
-- [ ] **Arise DB backup** — scheduled `pg_dump` of `automation_db` to a
+- [x] **Arise DB backup** — scheduled `pg_dump` of `automation_db` to a
       configurable location; documented restore. New `BackupService` +
       `@Scheduled`.
 - [ ] **Per-deployment volume backup** — restic/borg over SSH before a redeploy /
