@@ -19,6 +19,8 @@
 
     <properties>
         <java.version>21</java.version>
+        <lombok.version>1.18.46</lombok.version>
+        <mockito.version>5.23.0</mockito.version>
         <mapstruct.version>1.5.5.Final</mapstruct.version>
         <jjwt.version>0.12.3</jjwt.version>
         <jsch.version>0.2.19</jsch.version>
@@ -243,6 +245,13 @@
                             <version>0.2.0</version>
                         </path>
                     </annotationProcessorPaths>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <argLine>-Dnet.bytebuddy.experimental=true</argLine>
                 </configuration>
             </plugin>
         </plugins>
