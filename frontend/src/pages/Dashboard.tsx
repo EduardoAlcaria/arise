@@ -110,6 +110,16 @@ export default function Dashboard() {
     days.includes(d.createdAt.slice(0, 10)) && d.status === 'SUCCESS').length ?? 0
   const weekSuccessRate = weekTotal > 0 ? Math.round((weekSuccess / weekTotal) * 100) : 0
 
+  const finishedThisWeek = (deployments?.content ?? []).filter(d =>
+    days.includes(d.createdAt.slice(0, 10)) && d.startedAt && d.finishedAt)
+  const avgDurationSeconds = finishedThisWeek.length > 0
+    ? Math.round(finishedThisWeek.reduce((sum, d) =>
+        sum + (new Date(d.finishedAt!).getTime() - new Date(d.startedAt!).getTime()) / 1000, 0) / finishedThisWeek.length)
+    : null
+  const avgDurationLabel = avgDurationSeconds == null ? undefined
+    : avgDurationSeconds < 60 ? `avg ${avgDurationSeconds}s`
+    : `avg ${Math.floor(avgDurationSeconds / 60)}m ${avgDurationSeconds % 60}s`
+
   const viewLogs = (d: Deployment) => navigate('/deployments', { state: { openId: d.id, openName: d.name } })
 
   const onboardingLoading = machinesLoading || githubLoading || deploymentsLoading
@@ -128,7 +138,7 @@ export default function Dashboard() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6 stagger">
         {deploymentsLoading ? <StatCardSkeleton /> : (
           <StatCard icon={Rocket} label="Deploys this week" value={weekTotal} color="bg-chart-2/20 text-chart-2"
-            trend={weekTotal > 0 ? deploysPerDay : undefined} />
+            trend={weekTotal > 0 ? deploysPerDay : undefined} sub={avgDurationLabel} />
         )}
         {deploymentsLoading ? <StatCardSkeleton /> : (
           <StatCard icon={CheckCircle} label="Success rate" value={`${weekSuccessRate}%`} color="bg-chart-5/20 text-chart-5"
