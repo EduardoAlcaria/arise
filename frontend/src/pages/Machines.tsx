@@ -4,6 +4,8 @@ import { getMachines, createMachine, updateMachine, deleteMachine, testMachine, 
 import { Plus, Trash2, Wifi, Terminal, X, Search, Server, Pencil, Loader2 } from 'lucide-react'
 import { OsIcon, StatusDot } from '../components/icons'
 import TerminalModal from '../components/TerminalModal'
+import MachineTelemetry from '../components/MachineTelemetry'
+import ErrorBanner, { errorMessage } from '../components/ErrorBanner'
 
 const emptyForm: MachineRequest = { name: '', host: '', port: 22, sshUser: '', privateKey: '', tunnelType: 'DIRECT', proxyCommand: '' }
 
@@ -134,7 +136,9 @@ export default function Machines() {
                 </div>
               </div>
 
-              <p className="text-[11px] text-muted-foreground mb-4">Last seen {timeAgo(m.lastSeen)}</p>
+              <p className="text-[11px] text-muted-foreground mb-1">Last seen {timeAgo(m.lastSeen)}</p>
+
+              {m.status === 'ONLINE' && <MachineTelemetry machineId={m.id} />}
 
               <div className="flex items-center gap-1.5 pt-3 border-t border-border">
                 <button
@@ -260,9 +264,7 @@ export default function Machines() {
                 </div>
               )}
               {(createMut.error || updateMut.error) && (
-                <p className="text-destructive text-xs">
-                  {((createMut.error ?? updateMut.error) as any)?.response?.data?.message ?? 'Request failed'}
-                </p>
+                <ErrorBanner message={errorMessage(createMut.error ?? updateMut.error, 'Request failed')} />
               )}
               <div className="flex gap-2 pt-1">
                 <button type="button" onClick={closeForm} className="flex-1 py-2.5 border border-border text-foreground text-sm rounded-lg hover:bg-muted transition-colors">Cancel</button>
