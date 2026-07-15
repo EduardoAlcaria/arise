@@ -473,7 +473,7 @@ export default function CiCd() {
   const [showTrigger, setShowTrigger] = useState(false)
   const [showSetupRunner, setShowSetupRunner] = useState(false)
 
-  const { data: ghRepos } = useQuery({
+  const { data: ghRepos, isLoading: ghReposLoading } = useQuery({
     queryKey: ['github-repos'],
     queryFn: getRepos,
     staleTime: 120_000,
@@ -565,7 +565,7 @@ export default function CiCd() {
         <div className="flex flex-col items-center justify-center py-20 gap-3 text-muted-foreground">
           <GitBranch size={32} className="opacity-20" />
           <p className="text-sm opacity-50">Select a repository to view its pipelines.</p>
-          {repos.length === 0 && (
+          {!ghReposLoading && repos.length === 0 && (
             <p className="text-xs opacity-40">No GitHub repos found. Add your PAT in Settings → GitHub.</p>
           )}
         </div>
