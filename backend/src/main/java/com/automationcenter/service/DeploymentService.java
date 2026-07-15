@@ -16,6 +16,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -43,6 +44,12 @@ public class DeploymentService {
     private final ObjectMapper objectMapper;
     private final CloudflareService cloudflareService;
     private final LogBroadcaster logBroadcaster;
+
+    @Value("${deploy.health-check-timeout-ms:60000}")
+    private long healthCheckTimeoutMs = 60_000;
+
+    @Value("${deploy.health-check-interval-ms:3000}")
+    private long healthCheckIntervalMs = 3_000;
 
     @Transactional
     public DeploymentResponse create(DeploymentRequest request, Long ownerId) {
@@ -868,9 +875,6 @@ public class DeploymentService {
         }
     }
 
-    private static final long HEALTH_CHECK_TIMEOUT_MS = 60_000;
-    private static final long HEALTH_CHECK_INTERVAL_MS = 3_000;
-
     /**
      * Positively verify container health via `docker compose ps --all --format json`.
      * A service is healthy when it is running, or has exited cleanly (code 0) — the
@@ -879,7 +883,7 @@ public class DeploymentService {
      * crash slip through as success).
      *
      * <p>Fail-closed: returns true ONLY when a probe positively confirms every service
-     * is healthy. Polls up to {@link #HEALTH_CHECK_TIMEOUT_MS} so slow-starting
+     * is healthy. Polls up to {@code healthCheckTimeoutMs} so slow-starting
      * containers get time to come up. If the probe can never be read (ps errors / empty)
      * or any service stays unhealthy until the deadline, returns false — health is
      * never assumed.
@@ -887,7 +891,7 @@ public class DeploymentService {
     private boolean composeHealthy(Deployment deployment, Machine machine, String repoDir, String composeFileFlag) {
         String psCmd = "cd " + sq(repoDir) + " && docker compose" + composeFileFlag
                 + " ps --all --format json 2>&1";
-        long deadline = System.currentTimeMillis() + HEALTH_CHECK_TIMEOUT_MS;
+        long deadline = System.currentTimeMillis() + healthCheckTimeoutMs;
         List<ComposePsParser.ServiceState> lastBad = List.of();
         String lastProbe = "";
         int lastExit = -1;
@@ -906,7 +910,7 @@ public class DeploymentService {
             }
             if (System.currentTimeMillis() >= deadline) break;
             try {
-                Thread.sleep(HEALTH_CHECK_INTERVAL_MS);
+                Thread.sleep(healthCheckIntervalMs);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 break;
@@ -930,7 +934,7 @@ public class DeploymentService {
         }
         appendLog(deployment, "Health check FAILED: "
                 + lastBad.stream().map(ComposePsParser.ServiceState::service).toList()
-                + " not healthy after " + (HEALTH_CHECK_TIMEOUT_MS / 1000) + "s.", LogLevel.ERROR);
+                + " not healthy after " + (healthCheckTimeoutMs / 1000) + "s.", LogLevel.ERROR);
         return false;
     }
 
