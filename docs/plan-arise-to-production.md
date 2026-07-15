@@ -57,18 +57,18 @@ having a test machine. With that, W1→W6 stack safely on top.
 
 ## Workstream 0 — Testability & CI (do first; unblocks everything)
 
-- [ ] **Add a Maven wrapper** (`mvnw`/`mvnw.cmd`) so the build runs without a
+- [x] **Add a Maven wrapper** (`mvnw`/`mvnw.cmd`) so the build runs without a
       system Maven. `mvn -N wrapper:wrapper` (once, from a machine with Maven) or
       commit the wrapper files.
-- [ ] **GitHub Actions CI** — `.github/workflows/ci.yml`: build + `mvn test` on
+- [x] **GitHub Actions CI** — `.github/workflows/ci.yml`: build + `mvn test` on
       push/PR; frontend `npm ci && npm run build`. Arise is a CI/CD tool with no
       CI — fix the optics and the safety net.
-- [ ] **Frontend test setup** — add **Vitest + @testing-library/react**; one smoke
+- [x] **Frontend test setup** — add **Vitest + @testing-library/react**; one smoke
       test per page render to start.
-- [ ] **Controller slice tests** — `@WebMvcTest` for `AuthController`,
+- [x] **Controller slice tests** — `@WebMvcTest` for `AuthController`,
       `DeploymentController`, `WebhookController` (HMAC verify path is
       security-critical and currently untested).
-- [ ] **Service tests with a mocked `SshService`** — cover `DeploymentService`
+- [x] **Service tests with a mocked `SshService`** — cover `DeploymentService`
       happy path + health-gate FAILED path + tunnel-failure-stays-SUCCESS path.
       `SshService` is the seam: inject a fake that returns canned
       `SshCommandResponse`s.
@@ -167,8 +167,10 @@ Rebuild `pages/Dashboard.tsx` from "4 cards + 2 lists" into a live cockpit:
 
 ## Workstream 7 — Polish / cleanup
 
-- [ ] Fix `GitHubService.getFileContent` silent failure (`service/GitHubService
-      .java:151` — unchecked cast → `""`).
+- [x] Fix `GitHubService.getFileContent` silent failure (`service/GitHubService
+      .java:151` — unchecked cast → `""`). Turned out to be a genuine compile
+      error (cast `Optional<Map<...>>` to `String`) masked until now because
+      nothing ever ran `mvn compile` locally — fixed while unblocking W0.
 - [ ] Standardize an **error state** component; Login/Register have almost none.
 - [ ] Split monster files: `pages/AWS.tsx` (1478 LOC),
       `components/DeployRepoWizard.tsx` (1113 LOC).
