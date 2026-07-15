@@ -2,7 +2,8 @@ import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { login } from '../api/auth'
 import { useAuthStore } from '../stores/authStore'
-import { AlertCircle, Server, Box, Rocket, GitFork, Zap } from 'lucide-react'
+import { Server, Box, Rocket, GitFork, Zap } from 'lucide-react'
+import ErrorBanner from '../components/ErrorBanner'
 
 const FEATURES = [
   { icon: Server,  text: 'SSH machine management & remote execution' },
@@ -91,12 +92,7 @@ export default function Login() {
           <h2 className="text-2xl font-bold text-foreground mb-1">Welcome back</h2>
           <p className="text-muted-foreground text-sm mb-7">Sign in to your account to continue</p>
 
-          {error && (
-            <div className="mb-5 p-3 rounded-lg flex items-center gap-2.5 text-sm text-destructive border border-destructive/20 bg-destructive/8">
-              <AlertCircle size={14} className="shrink-0" />
-              {error}
-            </div>
-          )}
+          <ErrorBanner message={error} className="mb-5" />
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
