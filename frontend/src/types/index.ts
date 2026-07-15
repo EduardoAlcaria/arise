@@ -109,6 +109,15 @@ export interface Page<T> {
   size: number
 }
 
+export interface MachineMetric {
+  cpuLoad: number | null
+  memUsedMb: number | null
+  memTotalMb: number | null
+  diskUsedMb: number | null
+  diskTotalMb: number | null
+  timestamp: string
+}
+
 export interface AuditEntry {
   id: number
   username: string
