@@ -1,5 +1,5 @@
 import client from './client'
-import type { Machine, TunnelType } from '../types'
+import type { Machine, MachineMetric, TunnelType } from '../types'
 
 export interface MachineRequest {
   name: string
@@ -19,3 +19,5 @@ export const deleteMachine = (id: number) => client.delete(`/machines/${id}`)
 export const testMachine = (id: number) => client.post<{ online: boolean }>(`/machines/${id}/test`).then((r) => r.data)
 export const execOnMachine = (id: number, command: string) =>
   client.post<{ stdout: string; stderr: string; exitCode: number }>(`/machines/${id}/exec`, { command }).then((r) => r.data)
+export const getMachineMetrics = (id: number) =>
+  client.get<MachineMetric[]>(`/machines/${id}/metrics`).then((r) => r.data)
