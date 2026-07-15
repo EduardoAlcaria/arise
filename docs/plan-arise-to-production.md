@@ -187,7 +187,9 @@ Rebuild `pages/Dashboard.tsx` from "4 cards + 2 lists" into a live cockpit:
       response — wiping the error before React could render it.
 - [ ] Split monster files: `pages/AWS.tsx` (1478 LOC),
       `components/DeployRepoWizard.tsx` (1113 LOC).
-- [ ] Onboarding / first-run empty-state guide.
+- [x] Onboarding / first-run empty-state guide. `OnboardingGuide` on the
+      Dashboard: 3-step checklist (machine, GitHub, deploy) that auto-hides
+      once all three are done.
 - [ ] Delete stale merged remote branches (`feat/env-injection`, `feat/live-logs`,
       `feat/real-rollback`, `feat/redeploy`, `feat/topology`).
 
