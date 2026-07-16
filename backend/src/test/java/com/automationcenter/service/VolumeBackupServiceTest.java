@@ -34,6 +34,8 @@ class VolumeBackupServiceTest {
                 .sshUser("root").privateKey("key").tunnelType(TunnelType.DIRECT).build();
         deployment = Deployment.builder().id(100L).name("widgets").type(DeploymentType.REPOSITORY)
                 .deployDir("/tmp/deploy_100").machine(machine).build();
+        lenient().when(sshService.execute(eq(machine), eq("echo $HOME")))
+                .thenReturn(new SshCommandResponse("/root", "", 0));
     }
 
     @Test
