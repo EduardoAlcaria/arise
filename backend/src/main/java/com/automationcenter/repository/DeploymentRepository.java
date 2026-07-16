@@ -19,8 +19,8 @@ public interface DeploymentRepository extends JpaRepository<Deployment, Long> {
     Optional<Deployment> findTopByRepositoryUrlAndMachine_IdAndTypeAndStatusAndIdNotOrderByCreatedAtDesc(
             String repositoryUrl, Long machineId, DeploymentType type, DeploymentStatus status, Long excludeId);
 
-    Optional<Deployment> findTopByMachine_IdAndTypeAndStatusAndIdNotOrderByCreatedAtDesc(
-            Long machineId, DeploymentType type, DeploymentStatus status, Long excludeId);
+    Optional<Deployment> findTopByNameAndMachine_IdAndTypeAndStatusAndIdNotOrderByCreatedAtDesc(
+            String name, Long machineId, DeploymentType type, DeploymentStatus status, Long excludeId);
 
     List<Deployment> findByStatusIn(Collection<DeploymentStatus> statuses);
 }
