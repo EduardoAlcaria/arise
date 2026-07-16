@@ -59,7 +59,7 @@ public class VolumeBackupService {
             }
 
             String password = ensureRepoPassword(deployment);
-            String repoDir = backupRepoDir(deployment);
+            String repoDir = backupRepoDir(machine, deployment);
             Map<String, String> env = Map.of("RESTIC_PASSWORD", password, "RESTIC_REPOSITORY", repoDir);
 
             var initResult = run(machine, env, "restic snapshots -q > /dev/null 2>&1 || restic init -q");
@@ -93,8 +93,17 @@ public class VolumeBackupService {
         return password;
     }
 
-    private String backupRepoDir(Deployment deployment) {
-        return "$HOME/.arise-backups/" + deployment.getId();
+    /**
+     * Resolves the remote $HOME via SSH rather than embedding the literal string "$HOME"
+     * in a value that later gets single-quoted for export — single quotes suppress shell
+     * expansion, so restic would silently create the repo under a directory literally
+     * named "$HOME" instead of the real home directory.
+     */
+    private String backupRepoDir(Machine machine, Deployment deployment) {
+        var home = sshService.execute(machine, "echo $HOME");
+        String remoteHome = home.getExitCode() == 0 && !home.getStdout().isBlank()
+                ? home.getStdout().strip() : "/tmp";
+        return remoteHome + "/.arise-backups/" + deployment.getId();
     }
 
     private boolean ensureResticInstalled(Machine machine) {
@@ -102,11 +111,14 @@ public class VolumeBackupService {
                 "PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH command -v restic 2>/dev/null");
         if (check.getExitCode() == 0 && !check.getStdout().isBlank()) return true;
 
+        String downloadUrl = "https://github.com/restic/restic/releases/download/v"
+                + RESTIC_VERSION + "/restic_" + RESTIC_VERSION + "_${os}_${a}.bz2";
         String installCmd =
                 "arch=$(uname -m); case \"$arch\" in x86_64) a=amd64;; aarch64|arm64) a=arm64;; *) exit 1;; esac; "
                         + "os=$(uname -s | tr 'A-Z' 'a-z'); "
-                        + "curl -fsSL -o /tmp/restic.bz2 https://github.com/restic/restic/releases/download/v"
-                        + RESTIC_VERSION + "/restic_" + RESTIC_VERSION + "_${os}_${a}.bz2 && "
+                        // Minimal remote targets (Alpine, BusyBox) often ship wget but not curl.
+                        + "(command -v curl >/dev/null && curl -fsSL -o /tmp/restic.bz2 " + downloadUrl + ") "
+                        + "|| wget -qO /tmp/restic.bz2 " + downloadUrl + " && "
                         + "bunzip2 -f /tmp/restic.bz2 && chmod +x /tmp/restic && "
                         + "(sudo mv /tmp/restic /usr/local/bin/restic 2>/dev/null || mv /tmp/restic /usr/local/bin/restic)";
         var install = sshService.execute(machine, installCmd, RESTIC_TIMEOUT_SECONDS);
@@ -117,11 +129,17 @@ public class VolumeBackupService {
         return true;
     }
 
+    /**
+     * An inline {@code VAR=val cmd1 || cmd2} prefix only scopes to {@code cmd1} in POSIX
+     * shell — {@code cmd2} after the {@code ||}/{@code &&} runs without it. `restic init`
+     * (which only runs after `restic snapshots` fails) needs the repository/password env
+     * too, so export instead of prefixing.
+     */
     private com.automationcenter.dto.machine.SshCommandResponse run(Machine machine, Map<String, String> env, String command) {
-        String envPrefix = env.entrySet().stream()
-                .map(e -> e.getKey() + "=" + sq(e.getValue()))
-                .reduce("", (a, b) -> a + b + " ");
-        return sshService.execute(machine, envPrefix + command, RESTIC_TIMEOUT_SECONDS);
+        String exports = env.entrySet().stream()
+                .map(e -> "export " + e.getKey() + "=" + sq(e.getValue()) + "; ")
+                .reduce("", String::concat);
+        return sshService.execute(machine, exports + command, RESTIC_TIMEOUT_SECONDS);
     }
 
     private static String sq(String s) {
