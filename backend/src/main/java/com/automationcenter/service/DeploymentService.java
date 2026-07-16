@@ -910,8 +910,9 @@ public class DeploymentService {
                     ? deploymentRepository.findTopByRepositoryUrlAndMachine_IdAndTypeAndStatusAndIdNotOrderByCreatedAtDesc(
                             current.getRepositoryUrl(), machine.getId(), current.getType(),
                             DeploymentStatus.SUCCESS, current.getId())
-                    : deploymentRepository.findTopByMachine_IdAndTypeAndStatusAndIdNotOrderByCreatedAtDesc(
-                            machine.getId(), current.getType(), DeploymentStatus.SUCCESS, current.getId());
+                    : deploymentRepository.findTopByNameAndMachine_IdAndTypeAndStatusAndIdNotOrderByCreatedAtDesc(
+                            current.getName(), machine.getId(), current.getType(),
+                            DeploymentStatus.SUCCESS, current.getId());
 
             if (prev.isEmpty()) return;
             String prevDir = prev.get().getDeployDir();
