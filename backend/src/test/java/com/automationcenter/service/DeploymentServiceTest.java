@@ -76,6 +76,10 @@ class DeploymentServiceTest {
                         .findTopByRepositoryUrlAndMachine_IdAndTypeAndStatusAndIdNotOrderByCreatedAtDesc(
                                 any(), any(), any(), any(), any()))
                 .thenReturn(Optional.empty());
+        lenient().when(deploymentRepository
+                        .findTopByNameAndMachine_IdAndTypeAndStatusAndIdNotOrderByCreatedAtDesc(
+                                any(), any(), any(), any(), any()))
+                .thenReturn(Optional.empty());
 
         SshCommandResponse ok = new SshCommandResponse("ok", "", 0);
         lenient().when(sshService.execute(any(Machine.class), anyString())).thenReturn(ok);
@@ -146,5 +150,29 @@ class DeploymentServiceTest {
 
         assertThat(deployment.getStatus()).isEqualTo(DeploymentStatus.SUCCESS);
         verify(sshService).writeFileViaShell(eq(machine), eq("/tmp/deploy_" + DEPLOYMENT_ID + "/.env"), eq("API_KEY=s3cr3t"));
+    }
+
+    // Regression: a config-only APPLICATION deploy has no repositoryUrl to key teardown on.
+    // The fallback used to match "last SUCCESS deploy of this type on this machine" with no
+    // name check, so deploying app B tore down unrelated app A's containers on the same host.
+    @Test
+    void applicationDeployTeardownIsScopedByNameNotJustMachineAndType() {
+        deployment.setType(DeploymentType.APPLICATION);
+        deployment.setRepositoryUrl(null);
+        deployment.setApplicationServices("[]");
+        deployment.setApplicationConfigs("[]");
+        stubComposeHealth("[{\"Service\":\"web\",\"State\":\"running\"}]");
+
+        Deployment previousSameApp = Deployment.builder().id(99L).name("widgets")
+                .type(DeploymentType.APPLICATION).deployDir("/home/svc/arise-apps/99").build();
+        when(deploymentRepository.findTopByNameAndMachine_IdAndTypeAndStatusAndIdNotOrderByCreatedAtDesc(
+                eq("widgets"), eq(MACHINE_ID), eq(DeploymentType.APPLICATION), eq(DeploymentStatus.SUCCESS), eq(DEPLOYMENT_ID)))
+                .thenReturn(Optional.of(previousSameApp));
+
+        service.executeAsync(DEPLOYMENT_ID);
+
+        assertThat(deployment.getStatus()).isEqualTo(DeploymentStatus.SUCCESS);
+        verify(sshService).execute(eq(machine),
+                eq("cd '/home/svc/arise-apps/99' && docker compose down --remove-orphans 2>&1"), anyLong());
     }
 }
