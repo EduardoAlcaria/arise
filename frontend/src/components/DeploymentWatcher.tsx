@@ -93,10 +93,10 @@ function lineColor(msg: string): string {
 }
 
 function StepIcon({ status }: { status: Step['status'] }) {
-  if (status === 'running') return <Loader2 size={14} className="animate-spin text-blue-400 shrink-0" />
-  if (status === 'success') return <CheckCircle2 size={14} className="shrink-0" style={{ color: '#3fb950' }} />
-  if (status === 'failed')  return <XCircle size={14} className="shrink-0" style={{ color: '#f85149' }} />
-  return <Circle size={14} className="shrink-0" style={{ color: '#484f58' }} />
+  if (status === 'running') return <Loader2 size={14} className="animate-spin text-primary shrink-0" />
+  if (status === 'success') return <CheckCircle2 size={14} className="text-green-500 shrink-0" />
+  if (status === 'failed')  return <XCircle size={14} className="text-destructive shrink-0" />
+  return <Circle size={14} className="text-muted-foreground shrink-0" />
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -188,34 +188,25 @@ export default function DeploymentWatcher({ deploymentId, deploymentName, onClos
   const selectedStep = steps[selectedIdx] ?? null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 backdrop-blur-sm"
-         style={{ background: 'rgba(1,4,9,0.88)' }}>
-      <div
-        className="flex flex-col w-full max-w-5xl rounded-xl overflow-hidden"
-        style={{ height: '88vh', background: '#0d1117', border: '1px solid #30363d', boxShadow: '0 24px 64px rgba(0,0,0,0.8)' }}
-      >
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60">
+      <div className="flex flex-col w-full max-w-5xl bg-card border border-border rounded-xl overflow-hidden shadow-2xl" style={{ height: '88vh' }}>
         {/* ── Header ── */}
-        <div className="flex items-center gap-3 px-5 py-3 shrink-0" style={{ borderBottom: '1px solid #21262d', background: '#161b22' }}>
+        <div className="flex items-center gap-3 px-5 py-3 border-b border-border shrink-0">
           <div className="flex items-center gap-2 flex-1 min-w-0">
             {done
               ? (isSuccess
-                  ? <CheckCircle2 size={16} style={{ color: '#3fb950', flexShrink: 0 }} />
-                  : <XCircle size={16} style={{ color: '#f85149', flexShrink: 0 }} />)
-              : <Loader2 size={16} className="animate-spin shrink-0" style={{ color: '#58a6ff' }} />}
-            <span className="font-semibold text-sm truncate" style={{ color: '#e6edf3' }}>{deploymentName}</span>
-            <span className="text-[11px] font-mono shrink-0" style={{ color: '#484f58' }}>#{deploymentId}</span>
+                  ? <CheckCircle2 size={16} className="text-green-500 shrink-0" />
+                  : <XCircle size={16} className="text-destructive shrink-0" />)
+              : <Loader2 size={16} className="animate-spin text-primary shrink-0" />}
+            <span className="font-semibold text-sm text-foreground truncate">{deploymentName}</span>
+            <span className="text-[11px] font-mono text-muted-foreground shrink-0">#{deploymentId}</span>
           </div>
-          <span
-            className="text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 uppercase tracking-wider"
-            style={{
-              background: isSuccess ? '#1a3828' : isFailed ? '#3d1a1a' : '#1a2638',
-              color: isSuccess ? '#3fb950' : isFailed ? '#f85149' : '#58a6ff',
-              border: `1px solid ${isSuccess ? '#3fb95030' : isFailed ? '#f8514930' : '#58a6ff30'}`,
-            }}
-          >
+          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 uppercase tracking-wider ${
+            isSuccess ? 'status-online' : isFailed ? 'status-error' : 'status-building'
+          }`}>
             {status}
           </span>
-          <button onClick={onClose} style={{ color: '#484f58' }} className="hover:text-white transition-colors ml-1 shrink-0">
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors ml-1 shrink-0">
             <X size={16} />
           </button>
         </div>
@@ -223,12 +214,9 @@ export default function DeploymentWatcher({ deploymentId, deploymentName, onClos
         {/* ── Body: step list + log panel ── */}
         <div className="flex flex-1 min-h-0">
           {/* ── Left: step list ── */}
-          <div
-            className="flex flex-col shrink-0 overflow-y-auto"
-            style={{ width: 260, borderRight: '1px solid #21262d', background: '#0d1117' }}
-          >
+          <div className="flex flex-col shrink-0 overflow-y-auto border-r border-border" style={{ width: 260 }}>
             {steps.length === 0 ? (
-              <div className="flex items-center gap-2 px-4 py-6 text-xs" style={{ color: '#484f58' }}>
+              <div className="flex items-center gap-2 px-4 py-6 text-xs text-muted-foreground">
                 <Loader2 size={12} className="animate-spin" /> Waiting…
               </div>
             ) : (
@@ -238,22 +226,17 @@ export default function DeploymentWatcher({ deploymentId, deploymentName, onClos
                   <button
                     key={step.id}
                     onClick={() => setSelectedIdx(i)}
-                    className="flex items-center gap-2.5 px-4 py-2.5 text-left w-full transition-colors shrink-0"
-                    style={{
-                      background: active ? '#161b22' : 'transparent',
-                      borderLeft: active ? '2px solid #58a6ff' : '2px solid transparent',
-                      borderBottom: '1px solid #21262d',
-                    }}
-                    onMouseEnter={e => { if (!active) e.currentTarget.style.background = '#111317' }}
-                    onMouseLeave={e => { if (!active) e.currentTarget.style.background = 'transparent' }}
+                    className={`flex items-center gap-2.5 px-4 py-2.5 text-left w-full transition-colors shrink-0 border-b border-border/50 ${
+                      active ? 'bg-muted/30 border-l-2 border-l-primary' : 'border-l-2 border-l-transparent hover:bg-muted/10'
+                    }`}
                   >
                     <StepIcon status={step.status} />
                     <div className="flex-1 min-w-0">
-                      <div className="text-[12px] truncate" style={{ color: active ? '#e6edf3' : '#8b949e' }}>
+                      <div className={`text-[12px] truncate ${active ? 'text-foreground' : 'text-muted-foreground'}`}>
                         {step.name}
                       </div>
                       {stepDuration(i, step.status) && (
-                        <div className="text-[10px] mt-0.5" style={{ color: '#484f58' }}>
+                        <div className="text-[10px] text-muted-foreground/70 mt-0.5">
                           {stepDuration(i, step.status)}
                         </div>
                       )}
@@ -264,11 +247,8 @@ export default function DeploymentWatcher({ deploymentId, deploymentName, onClos
             )}
           </div>
 
-          {/* ── Right: log output ── */}
-          <div
-            className="flex-1 flex flex-col min-w-0 min-h-0"
-            style={{ background: '#010409' }}
-          >
+          {/* ── Right: log output — dark/monospace regardless of theme, standard for log viewers ── */}
+          <div className="flex-1 flex flex-col min-w-0 min-h-0 bg-[#0a0a0a]">
             {selectedStep ? (
               <>
                 {/* Log area */}
@@ -279,7 +259,7 @@ export default function DeploymentWatcher({ deploymentId, deploymentName, onClos
                 >
                   {selectedStep.lines.map((line, j) => (
                     <div key={j} className="flex gap-3 hover:bg-white/5 px-1 -mx-1 rounded">
-                      <span className="select-none text-right shrink-0 w-8" style={{ color: '#3d444d', fontSize: 11 }}>
+                      <span className="select-none text-right shrink-0 w-8 text-neutral-600" style={{ fontSize: 11 }}>
                         {j + 1}
                       </span>
                       <span style={{ color: lineColor(line), whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
@@ -291,11 +271,8 @@ export default function DeploymentWatcher({ deploymentId, deploymentName, onClos
                 </div>
 
                 {/* Log footer */}
-                <div
-                  className="flex items-center justify-between px-4 py-2 shrink-0"
-                  style={{ borderTop: '1px solid #21262d' }}
-                >
-                  <span className="text-[11px]" style={{ color: '#484f58' }}>
+                <div className="flex items-center justify-between px-4 py-2 border-t border-border/30 shrink-0">
+                  <span className="text-[11px] text-neutral-500">
                     {selectedStep.lines.length} line{selectedStep.lines.length !== 1 ? 's' : ''}
                     {!done && selectedStep.status === 'running' && ' · live'}
                   </span>
@@ -303,8 +280,7 @@ export default function DeploymentWatcher({ deploymentId, deploymentName, onClos
                     {!autoScroll && (
                       <button
                         onClick={() => { setAutoScroll(true); bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }}
-                        className="flex items-center gap-1.5 text-[12px] transition-colors"
-                        style={{ color: '#58a6ff' }}
+                        className="flex items-center gap-1.5 text-[12px] text-primary transition-colors"
                       >
                         <ArrowDown size={12} /> Bottom
                       </button>
@@ -313,7 +289,7 @@ export default function DeploymentWatcher({ deploymentId, deploymentName, onClos
                 </div>
               </>
             ) : (
-              <div className="flex items-center justify-center h-full text-xs" style={{ color: '#484f58' }}>
+              <div className="flex items-center justify-center h-full text-xs text-neutral-500">
                 Select a step to view logs
               </div>
             )}
@@ -321,20 +297,11 @@ export default function DeploymentWatcher({ deploymentId, deploymentName, onClos
         </div>
 
         {/* ── Footer ── */}
-        <div
-          className="flex items-center justify-between px-5 py-2.5 shrink-0"
-          style={{ borderTop: '1px solid #21262d', background: '#161b22' }}
-        >
-          <span className="text-[11px]" style={{ color: '#484f58' }}>
+        <div className="flex items-center justify-between px-5 py-2.5 border-t border-border shrink-0">
+          <span className="text-[11px] text-muted-foreground">
             {steps.length} step{steps.length !== 1 ? 's' : ''}{!done && ' · streaming live'}
           </span>
-          <button
-            onClick={onClose}
-            className="px-3.5 py-1.5 text-xs font-semibold rounded-md transition-colors"
-            style={{ background: done ? '#238636' : '#30363d', color: '#fff' }}
-            onMouseEnter={e => (e.currentTarget.style.background = done ? '#2ea043' : '#444c56')}
-            onMouseLeave={e => (e.currentTarget.style.background = done ? '#238636' : '#30363d')}
-          >
+          <button onClick={onClose} className={done ? 'btn-primary text-xs py-1.5 px-3.5' : 'btn-ghost text-xs py-1.5 px-3.5'}>
             {done ? 'Close' : 'Hide'}
           </button>
         </div>
