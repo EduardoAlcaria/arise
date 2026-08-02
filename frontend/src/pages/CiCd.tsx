@@ -8,6 +8,7 @@ import {
 import { getRepos } from '../api/github'
 import { getMachines } from '../api/machines'
 import WorkflowRunModal from '../components/WorkflowRunModal'
+import ErrorBanner, { errorMessage } from '../components/ErrorBanner'
 import {
   GitBranch, Play, RotateCcw, Trash2,
   CheckCircle2, XCircle, Clock, Loader2, Circle, Server, Workflow,
@@ -250,35 +251,26 @@ function SetupRunnerModal({
 
   if (sessionId) {
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
-           style={{ background: 'rgba(1,4,9,0.85)', backdropFilter: 'blur(2px)' }}>
-        <div className="flex flex-col w-full max-w-2xl rounded-xl overflow-hidden"
-             style={{ maxHeight: '80vh', background: '#0d1117', border: '1px solid #30363d' }}>
-          <div className="flex items-center justify-between px-5 py-3 shrink-0"
-               style={{ borderBottom: '1px solid #21262d', background: '#161b22' }}>
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60">
+        <div className="flex flex-col w-full max-w-2xl bg-card border border-border rounded-xl overflow-hidden shadow-2xl" style={{ maxHeight: '80vh' }}>
+          <div className="flex items-center justify-between px-5 py-3 border-b border-border shrink-0">
             <div className="flex items-center gap-2">
-              {(!sessionData || sessionData.status === 'RUNNING') && <Loader2 size={14} className="animate-spin" style={{ color: '#58a6ff' }} />}
-              {sessionData?.status === 'DONE' && <CheckCircle2 size={14} style={{ color: '#3fb950' }} />}
-              {sessionData?.status === 'FAILED' && <XCircle size={14} style={{ color: '#f85149' }} />}
-              <span className="text-sm font-semibold" style={{ color: '#e6edf3' }}>
+              {(!sessionData || sessionData.status === 'RUNNING') && <Loader2 size={14} className="animate-spin text-primary" />}
+              {sessionData?.status === 'DONE' && <CheckCircle2 size={14} className="text-green-500" />}
+              {sessionData?.status === 'FAILED' && <XCircle size={14} className="text-destructive" />}
+              <span className="text-sm font-semibold text-foreground">
                 Runner Setup — {owner}/{repo}
               </span>
             </div>
-            <button onClick={onClose} className="transition-colors" style={{ color: '#484f58' }}>
+            <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors">
               <X size={16} />
             </button>
           </div>
-          <div className="flex-1 overflow-y-auto font-mono text-[12px] p-4"
-               style={{ background: '#010409', color: '#8b949e', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+          <div className="flex-1 overflow-y-auto font-mono text-[12px] p-4 bg-[#0a0a0a] text-neutral-300 whitespace-pre-wrap break-all">
             {sessionData?.output ?? 'Starting…'}
           </div>
-          <div className="px-5 py-3 shrink-0 flex justify-end"
-               style={{ borderTop: '1px solid #21262d', background: '#161b22' }}>
-            <button
-              onClick={onClose}
-              className="px-3.5 py-1.5 text-xs font-semibold rounded-md"
-              style={{ background: '#30363d', color: '#fff' }}
-            >
+          <div className="px-5 py-3 shrink-0 flex justify-end border-t border-border">
+            <button onClick={onClose} className="btn-ghost text-xs py-1.5 px-3.5">
               {(!sessionData || sessionData.status === 'RUNNING') ? 'Hide' : 'Close'}
             </button>
           </div>
@@ -617,6 +609,9 @@ export default function CiCd() {
           {/* Runners tab */}
           {tab === 'runners' && (
             <div className="space-y-2">
+              {deleteRunnerMut.error && (
+                <ErrorBanner message={errorMessage(deleteRunnerMut.error, 'Failed to remove runner.')} className="mb-2" />
+              )}
               {(selectedRepo ? runnersLoading : allRunnersLoading) && (
                 <div className="flex items-center gap-2 text-sm text-muted-foreground py-8 justify-center">
                   <Loader2 size={16} className="animate-spin" /> Loading runners…
@@ -640,13 +635,20 @@ export default function CiCd() {
                   </button>
                 </div>
               )}
-              {(selectedRepo ? runners : allRunners)?.map(runner => (
-                <RunnerRow
-                  key={runner.id}
-                  runner={runner}
-                  onDelete={(id, rOwner, rRepo) => deleteRunnerMut.mutate({ runnerId: id, rOwner, rRepo })}
-                />
-              ))}
+              {(selectedRepo ? runners : allRunners)?.map(runner => {
+                // listRunners (single-repo view) doesn't echo owner/repo per runner since it's
+                // implied by the selected repo; listAllRunners (cross-repo view) does. Resolve
+                // from context here rather than trusting runner.repo, which is empty in the
+                // single-repo case and previously made delete silently target repos//... .
+                const [rOwner, rRepo] = selectedRepo ? [owner, repo] : (runner.repo?.split('/') ?? ['', ''])
+                return (
+                  <RunnerRow
+                    key={runner.id}
+                    runner={runner}
+                    onDelete={() => deleteRunnerMut.mutate({ runnerId: runner.id, rOwner, rRepo })}
+                  />
+                )
+              })}
             </div>
           )}
         </>
@@ -682,7 +684,7 @@ export default function CiCd() {
 
 // ── Runner row ────────────────────────────────────────────────────────────────
 
-function RunnerRow({ runner, onDelete }: { runner: Runner; onDelete: (id: number, owner: string, repo: string) => void }) {
+function RunnerRow({ runner, onDelete }: { runner: Runner; onDelete: () => void }) {
   const online = runner.status === 'online'
   return (
     <div className="flex items-center gap-3 px-4 py-3 border border-border rounded-lg group">
@@ -707,10 +709,7 @@ function RunnerRow({ runner, onDelete }: { runner: Runner; onDelete: (id: number
         {runner.status}
       </span>
       <button
-        onClick={() => {
-          const [rOwner, rRepo] = runner.repo?.split('/') ?? ['', '']
-          onDelete(runner.id, rOwner, rRepo)
-        }}
+        onClick={onDelete}
         className="p-1.5 rounded-md text-muted-foreground hover:text-destructive hover:bg-muted transition-colors opacity-0 group-hover:opacity-100"
         title="Remove runner"
       >
