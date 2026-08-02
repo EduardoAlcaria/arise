@@ -106,6 +106,28 @@ class AuditAspectTest {
     }
 
     @Test
+    void redactsSensitiveFieldsRegardlessOfNestingOrValueType() throws Throwable {
+        when(request.getMethod()).thenReturn("POST");
+        when(request.getRequestURI()).thenReturn("/api/auth/login");
+        var auth = new java.util.HashMap<String, Object>();
+        auth.put("pin", 4821); // non-string sensitive value
+        var nested = new java.util.HashMap<String, Object>();
+        nested.put("sessionCookie", "abc123"); // sensitive field inside a nested object
+        auth.put("nested", nested);
+        when(joinPoint.getArgs()).thenReturn(new Object[]{auth});
+        var loginResponse = java.util.Map.of("token", "eyJhbGciOiJIUzI1NiJ9.payload.sig", "email", "dev@example.com");
+        when(joinPoint.proceed()).thenReturn(org.springframework.http.ResponseEntity.ok(loginResponse));
+
+        aspect.audit(joinPoint);
+
+        ArgumentCaptor<AuditEntry> captor = ArgumentCaptor.forClass(AuditEntry.class);
+        verify(auditEntryRepository).save(captor.capture());
+        AuditEntry saved = captor.getValue();
+        assertThat(saved.getRequestBody()).doesNotContain("4821").doesNotContain("abc123");
+        assertThat(saved.getResponseBody()).doesNotContain("eyJhbGciOiJIUzI1NiJ9").contains("dev@example.com");
+    }
+
+    @Test
     void auditFailureDoesNotBreakUnderlyingRequest() throws Throwable {
         when(request.getMethod()).thenReturn("POST");
         when(request.getRequestURI()).thenReturn("/api/deployments");
