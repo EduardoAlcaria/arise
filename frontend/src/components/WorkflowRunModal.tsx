@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { getWorkflowJobs, getJobLogs, type WorkflowJob } from '../api/cicd'
+import { getWorkflowJobs, getJobLogs } from '../api/cicd'
+import { errorMessage } from './ErrorBanner'
 import { X, CheckCircle2, XCircle, Loader2, Circle, Clock, AlertTriangle, ArrowDown } from 'lucide-react'
 
 interface Props {
@@ -53,16 +54,21 @@ function stripTimestamp(line: string): string {
   return line.replace(/^\d{4}-\d{2}-\d{2}T[\d:.]+Z\s?/, '')
 }
 
+// Any conclusion other than 'success' (and non-null) counts as a failure for badge coloring —
+// GitHub uses several: failure, cancelled, timed_out, action_required, stale, startup_failure.
+function isFailureConclusion(conclusion: string | null): boolean {
+  return !!conclusion && conclusion !== 'success' && conclusion !== 'skipped' && conclusion !== 'neutral'
+}
+
 function StepIcon({ status, conclusion }: { status: string; conclusion: string | null }) {
-  if (status === 'in_progress') return <Loader2 size={14} className="animate-spin text-blue-400 shrink-0" />
-  if (status === 'queued') return <Clock size={14} className="shrink-0" style={{ color: '#d29922' }} />
+  if (status === 'in_progress') return <Loader2 size={14} className="animate-spin text-primary shrink-0" />
+  if (status === 'queued') return <Clock size={14} className="text-yellow-500 shrink-0" />
   if (status === 'completed') {
-    if (conclusion === 'success') return <CheckCircle2 size={14} className="shrink-0" style={{ color: '#3fb950' }} />
-    if (conclusion === 'failure') return <XCircle size={14} className="shrink-0" style={{ color: '#f85149' }} />
-    if (conclusion === 'cancelled') return <Circle size={14} className="shrink-0" style={{ color: '#484f58' }} />
-    return <AlertTriangle size={14} className="shrink-0" style={{ color: '#d29922' }} />
+    if (conclusion === 'success') return <CheckCircle2 size={14} className="text-green-500 shrink-0" />
+    if (isFailureConclusion(conclusion)) return <XCircle size={14} className="text-destructive shrink-0" />
+    return <AlertTriangle size={14} className="text-yellow-500 shrink-0" />
   }
-  return <Circle size={14} className="shrink-0" style={{ color: '#484f58' }} />
+  return <Circle size={14} className="text-muted-foreground shrink-0" />
 }
 
 const TERMINAL_JOB = ['completed']
@@ -97,7 +103,7 @@ export default function WorkflowRunModal({ owner, repo, runId, runName, onClose 
   }, [jobs])
 
   const allDone = !!jobs && jobs.every(j => TERMINAL_JOB.includes(j.status))
-  const anyFailed = !!jobs && jobs.some(j => j.conclusion === 'failure')
+  const anyFailed = !!jobs && jobs.some(j => isFailureConclusion(j.conclusion))
   const runStatus = !jobs || jobs.length === 0 ? 'queued' : allDone ? (anyFailed ? 'failure' : 'success') : 'in_progress'
 
   // Auto-follow the currently running step
@@ -134,30 +140,25 @@ export default function WorkflowRunModal({ owner, repo, runId, runName, onClose 
   }, [selected, parsedSections, jobs])
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 backdrop-blur-sm" style={{ background: 'rgba(1,4,9,0.88)' }}>
-      <div className="flex flex-col w-full max-w-5xl rounded-xl overflow-hidden" style={{ height: '88vh', background: '#0d1117', border: '1px solid #30363d', boxShadow: '0 24px 64px rgba(0,0,0,0.8)' }}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60">
+      <div className="flex flex-col w-full max-w-5xl bg-card border border-border rounded-xl overflow-hidden shadow-2xl" style={{ height: '88vh' }}>
         {/* Header */}
-        <div className="flex items-center gap-3 px-5 py-3 shrink-0" style={{ borderBottom: '1px solid #21262d', background: '#161b22' }}>
+        <div className="flex items-center gap-3 px-5 py-3 border-b border-border shrink-0">
           <div className="flex items-center gap-2 flex-1 min-w-0">
             {runStatus === 'in_progress' || runStatus === 'queued'
-              ? <Loader2 size={16} className="animate-spin shrink-0" style={{ color: '#58a6ff' }} />
+              ? <Loader2 size={16} className="animate-spin text-primary shrink-0" />
               : runStatus === 'success'
-                ? <CheckCircle2 size={16} style={{ color: '#3fb950', flexShrink: 0 }} />
-                : <XCircle size={16} style={{ color: '#f85149', flexShrink: 0 }} />}
-            <span className="font-semibold text-sm truncate" style={{ color: '#e6edf3' }}>{runName}</span>
-            <span className="text-[11px] font-mono shrink-0" style={{ color: '#484f58' }}>#{runId}</span>
+                ? <CheckCircle2 size={16} className="text-green-500 shrink-0" />
+                : <XCircle size={16} className="text-destructive shrink-0" />}
+            <span className="font-semibold text-sm text-foreground truncate">{runName}</span>
+            <span className="text-[11px] font-mono text-muted-foreground shrink-0">#{runId}</span>
           </div>
-          <span
-            className="text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 uppercase tracking-wider"
-            style={{
-              background: runStatus === 'success' ? '#1a3828' : runStatus === 'failure' ? '#3d1a1a' : '#1a2638',
-              color: runStatus === 'success' ? '#3fb950' : runStatus === 'failure' ? '#f85149' : '#58a6ff',
-              border: `1px solid ${runStatus === 'success' ? '#3fb95030' : runStatus === 'failure' ? '#f8514930' : '#58a6ff30'}`,
-            }}
-          >
+          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 uppercase tracking-wider ${
+            runStatus === 'success' ? 'status-online' : runStatus === 'failure' ? 'status-error' : 'status-building'
+          }`}>
             {runStatus === 'in_progress' ? 'Running' : runStatus === 'queued' ? 'Queued' : runStatus}
           </span>
-          <button onClick={onClose} style={{ color: '#484f58' }} className="hover:text-white transition-colors ml-1 shrink-0">
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors ml-1 shrink-0">
             <X size={16} />
           </button>
         </div>
@@ -165,17 +166,17 @@ export default function WorkflowRunModal({ owner, repo, runId, runName, onClose 
         {/* Body */}
         <div className="flex flex-1 min-h-0">
           {/* Sidebar: jobs + steps */}
-          <div className="flex flex-col shrink-0 overflow-y-auto" style={{ width: 280, borderRight: '1px solid #21262d', background: '#0d1117' }}>
+          <div className="flex flex-col shrink-0 overflow-y-auto border-r border-border" style={{ width: 280 }}>
             {!jobs ? (
-              <div className="flex items-center gap-2 px-4 py-6 text-xs" style={{ color: '#484f58' }}>
+              <div className="flex items-center gap-2 px-4 py-6 text-xs text-muted-foreground">
                 <Loader2 size={12} className="animate-spin" /> Loading jobs…
               </div>
             ) : (
               jobs.map(job => (
                 <div key={job.id}>
-                  <div className="flex items-center gap-2 px-4 py-2" style={{ background: '#161b22', borderBottom: '1px solid #21262d' }}>
+                  <div className="flex items-center gap-2 px-4 py-2 bg-muted/20 border-b border-border">
                     <StepIcon status={job.status} conclusion={job.conclusion} />
-                    <span className="text-[12px] font-semibold truncate" style={{ color: '#e6edf3' }}>{job.name}</span>
+                    <span className="text-[12px] font-semibold text-foreground truncate">{job.name}</span>
                   </div>
                   {steps.filter(s => s.jobId === job.id).map((step, localIdx) => {
                     const idx = steps.indexOf(step)
@@ -184,17 +185,12 @@ export default function WorkflowRunModal({ owner, repo, runId, runName, onClose 
                       <button
                         key={`${job.id}-${step.number}-${localIdx}`}
                         onClick={() => { setSelectedIdx(idx); setAutoFollow(false) }}
-                        className="flex items-center gap-2.5 pl-7 pr-4 py-2 text-left w-full transition-colors shrink-0"
-                        style={{
-                          background: active ? '#161b22' : 'transparent',
-                          borderLeft: active ? '2px solid #58a6ff' : '2px solid transparent',
-                          borderBottom: '1px solid #21262d',
-                        }}
-                        onMouseEnter={e => { if (!active) e.currentTarget.style.background = '#111317' }}
-                        onMouseLeave={e => { if (!active) e.currentTarget.style.background = 'transparent' }}
+                        className={`flex items-center gap-2.5 pl-7 pr-4 py-2 text-left w-full transition-colors shrink-0 border-b border-border/50 ${
+                          active ? 'bg-muted/30 border-l-2 border-l-primary' : 'border-l-2 border-l-transparent hover:bg-muted/10'
+                        }`}
                       >
                         <StepIcon status={step.status} conclusion={step.conclusion} />
-                        <span className="text-[12px] truncate" style={{ color: active ? '#e6edf3' : '#8b949e' }}>{step.name}</span>
+                        <span className={`text-[12px] truncate ${active ? 'text-foreground' : 'text-muted-foreground'}`}>{step.name}</span>
                       </button>
                     )
                   })}
@@ -203,35 +199,35 @@ export default function WorkflowRunModal({ owner, repo, runId, runName, onClose 
             )}
           </div>
 
-          {/* Log panel */}
-          <div className="flex-1 flex flex-col min-w-0 min-h-0" style={{ background: '#010409' }}>
+          {/* Log panel — dark/monospace regardless of theme, standard for log viewers */}
+          <div className="flex-1 flex flex-col min-w-0 min-h-0 bg-[#0a0a0a]">
             {!selected ? (
-              <div className="flex items-center justify-center h-full text-xs" style={{ color: '#484f58' }}>
+              <div className="flex items-center justify-center h-full text-xs text-muted-foreground">
                 Select a step to view logs
               </div>
             ) : !jobDone(selected.jobId) ? (
-              <div className="flex flex-col items-center justify-center h-full gap-2 text-xs" style={{ color: '#484f58' }}>
+              <div className="flex flex-col items-center justify-center h-full gap-2 text-xs text-muted-foreground">
                 <Loader2 size={16} className="animate-spin" />
                 Waiting for step to finish — GitHub only serves logs once a job completes
               </div>
             ) : logLoading ? (
-              <div className="flex items-center justify-center h-full gap-2 text-xs" style={{ color: '#484f58' }}>
+              <div className="flex items-center justify-center h-full gap-2 text-xs text-muted-foreground">
                 <Loader2 size={12} className="animate-spin" /> Loading logs…
               </div>
             ) : logError ? (
-              <div className="flex items-center justify-center h-full text-xs" style={{ color: '#f85149' }}>
-                Failed to load logs.
+              <div className="flex items-center justify-center h-full text-xs text-destructive px-6 text-center">
+                {errorMessage(logError, 'Failed to load logs.')}
               </div>
             ) : stepLines.length === 0 ? (
-              <div className="flex items-center justify-center h-full text-xs" style={{ color: '#484f58' }}>
+              <div className="flex items-center justify-center h-full text-xs text-muted-foreground">
                 No log output for this step.
               </div>
             ) : (
               <div className="flex-1 overflow-y-auto font-mono text-[12px] leading-relaxed px-4 py-3">
                 {stepLines.map((line, j) => (
                   <div key={j} className="flex gap-3 hover:bg-white/5 px-1 -mx-1 rounded">
-                    <span className="select-none text-right shrink-0 w-8" style={{ color: '#3d444d', fontSize: 11 }}>{j + 1}</span>
-                    <span style={{ color: '#8b949e', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{stripTimestamp(line)}</span>
+                    <span className="select-none text-right shrink-0 w-8 text-neutral-600" style={{ fontSize: 11 }}>{j + 1}</span>
+                    <span className="text-neutral-300 whitespace-pre-wrap break-all">{stripTimestamp(line)}</span>
                   </div>
                 ))}
               </div>
@@ -240,23 +236,17 @@ export default function WorkflowRunModal({ owner, repo, runId, runName, onClose 
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-between px-5 py-2.5 shrink-0" style={{ borderTop: '1px solid #21262d', background: '#161b22' }}>
-          <span className="text-[11px]" style={{ color: '#484f58' }}>
+        <div className="flex items-center justify-between px-5 py-2.5 border-t border-border shrink-0">
+          <span className="text-[11px] text-muted-foreground">
             {steps.length} step{steps.length !== 1 ? 's' : ''}{!allDone && ' · live'}
           </span>
           <div className="flex items-center gap-3">
             {!autoFollow && !allDone && (
-              <button onClick={() => setAutoFollow(true)} className="flex items-center gap-1.5 text-[12px] transition-colors" style={{ color: '#58a6ff' }}>
+              <button onClick={() => setAutoFollow(true)} className="flex items-center gap-1.5 text-[12px] text-primary transition-colors">
                 <ArrowDown size={12} /> Follow live step
               </button>
             )}
-            <button
-              onClick={onClose}
-              className="px-3.5 py-1.5 text-xs font-semibold rounded-md transition-colors"
-              style={{ background: allDone ? '#238636' : '#30363d', color: '#fff' }}
-              onMouseEnter={e => (e.currentTarget.style.background = allDone ? '#2ea043' : '#444c56')}
-              onMouseLeave={e => (e.currentTarget.style.background = allDone ? '#238636' : '#30363d')}
-            >
+            <button onClick={onClose} className={allDone ? 'btn-primary text-xs py-1.5 px-3.5' : 'btn-ghost text-xs py-1.5 px-3.5'}>
               {allDone ? 'Close' : 'Hide'}
             </button>
           </div>
