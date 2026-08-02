@@ -14,5 +14,7 @@ public class AuditEntryResponse {
     private String path;
     private boolean success;
     private String errorMessage;
+    private String requestBody;
+    private String responseBody;
     private LocalDateTime timestamp;
 }
