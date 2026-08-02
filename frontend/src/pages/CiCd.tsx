@@ -398,7 +398,7 @@ export default function CiCd() {
   function changeRepo(r: string) { setSelectedRepo(r); localStorage.setItem('cicd:repo', r) }
   const [showTrigger, setShowTrigger] = useState(false)
   const [showSetupRunner, setShowSetupRunner] = useState(false)
-  const [watchingRun, setWatchingRun] = useState<{ id: number; name: string } | null>(null)
+  const [watchingRun, setWatchingRun] = useState<{ id: number; name: string; status: string; conclusion: string | null } | null>(null)
 
   const { data: ghRepos, isLoading: ghReposLoading } = useQuery({
     queryKey: ['github-repos'],
@@ -450,7 +450,13 @@ export default function CiCd() {
 
   const rerunMut = useMutation({
     mutationFn: (runId: number) => rerunWorkflow(owner, repo, runId),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['cicd-runs'] }),
+    onSuccess: (_data, runId) => {
+      qc.invalidateQueries({ queryKey: ['cicd-runs'] })
+      // GitHub reuses the same run id (and often the same job ids) on rerun — without this,
+      // a modal reopened for this run would show cached jobs/logs from the failed attempt.
+      qc.invalidateQueries({ queryKey: ['cicd-run-jobs', owner, repo, runId] })
+      qc.removeQueries({ queryKey: ['cicd-run-job-log'] })
+    },
   })
 
   const deleteRunnerMut = useMutation({
@@ -574,7 +580,7 @@ export default function CiCd() {
                   key={run.id}
                   run={run}
                   onRerun={id => rerunMut.mutate(id)}
-                  onOpen={() => setWatchingRun({ id: run.id, name: run.name })}
+                  onOpen={() => setWatchingRun({ id: run.id, name: run.name, status: run.status, conclusion: run.conclusion })}
                 />
               ))}
             </div>
@@ -675,6 +681,8 @@ export default function CiCd() {
           repo={repo}
           runId={watchingRun.id}
           runName={watchingRun.name}
+          initialStatus={watchingRun.status}
+          initialConclusion={watchingRun.conclusion}
           onClose={() => setWatchingRun(null)}
         />
       )}
