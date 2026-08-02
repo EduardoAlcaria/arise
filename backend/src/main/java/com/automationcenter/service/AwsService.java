@@ -333,6 +333,11 @@ public class AwsService {
 
     public void startInstance(Long userId, Long accountId, String instanceId, String region) {
         AwsAccount account = getAccount(accountId, userId);
+        if (DataSeeder.getDemoProfile().equals(account.getProfileName())) {
+            MockAwsData.setEc2State(instanceId, "running");
+            evictAccount(accountId);
+            return;
+        }
         String effectiveRegion = region != null ? region : account.getDefaultRegion();
         try (Ec2Client ec2 = buildEc2Client(account, effectiveRegion)) {
             ec2.startInstances(StartInstancesRequest.builder().instanceIds(instanceId).build());
@@ -343,6 +348,11 @@ public class AwsService {
 
     public void stopInstance(Long userId, Long accountId, String instanceId, String region) {
         AwsAccount account = getAccount(accountId, userId);
+        if (DataSeeder.getDemoProfile().equals(account.getProfileName())) {
+            MockAwsData.setEc2State(instanceId, "stopped");
+            evictAccount(accountId);
+            return;
+        }
         String effectiveRegion = region != null ? region : account.getDefaultRegion();
         try (Ec2Client ec2 = buildEc2Client(account, effectiveRegion)) {
             ec2.stopInstances(StopInstancesRequest.builder().instanceIds(instanceId).build());
@@ -353,6 +363,11 @@ public class AwsService {
 
     public void terminateInstance(Long userId, Long accountId, String instanceId, String region) {
         AwsAccount account = getAccount(accountId, userId);
+        if (DataSeeder.getDemoProfile().equals(account.getProfileName())) {
+            MockAwsData.setEc2State(instanceId, "terminated");
+            evictAccount(accountId);
+            return;
+        }
         String effectiveRegion = region != null ? region : account.getDefaultRegion();
         try (Ec2Client ec2 = buildEc2Client(account, effectiveRegion)) {
             ec2.terminateInstances(TerminateInstancesRequest.builder().instanceIds(instanceId).build());
