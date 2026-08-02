@@ -149,6 +149,48 @@ class DeploymentServiceTest {
     }
 
     @Test
+    void deployFromTemplateCreatesNewDeploymentWithGivenNameAndMachine() {
+        Machine target = Machine.builder().id(6L).name("target-box").host("h2").port(22)
+                .sshUser("root").privateKey("key").tunnelType(TunnelType.DIRECT).build();
+        when(machineRepository.findByIdAndOwnerId(6L, OWNER_ID)).thenReturn(Optional.of(target));
+        when(machineRepository.findById(6L)).thenReturn(Optional.of(target));
+        when(deploymentRepository.findByIdAndOwnerId(DEPLOYMENT_ID, OWNER_ID)).thenReturn(Optional.of(deployment));
+        stubComposeHealth("[{\"Service\":\"web\",\"State\":\"running\"}]");
+
+        Deployment[] created = new Deployment[1];
+        when(deploymentRepository.save(any(Deployment.class))).thenAnswer(inv -> {
+            Deployment d = inv.getArgument(0);
+            if (d.getId() == null) {
+                d.setId(200L);
+                created[0] = d;
+            }
+            return d;
+        });
+        when(deploymentRepository.findById(200L)).thenAnswer(inv -> Optional.ofNullable(created[0]));
+
+        var resp = service.deployFromTemplate(DEPLOYMENT_ID, OWNER_ID, "clone-of-widgets", 6L);
+
+        assertThat(resp.getName()).isEqualTo("clone-of-widgets");
+        assertThat(resp.getMachineId()).isEqualTo(6L);
+        assertThat(resp.getRepositoryUrl()).isEqualTo("https://github.com/acme/widgets.git");
+        assertThat(created[0].getStatus()).isEqualTo(DeploymentStatus.SUCCESS);
+    }
+
+    @Test
+    void listByOwnerReturnsAllDeploymentsForAdmin() {
+        User admin = User.builder().id(OWNER_ID).role(Role.ADMIN).build();
+        when(userRepository.findById(OWNER_ID)).thenReturn(Optional.of(admin));
+        var pageable = org.springframework.data.domain.PageRequest.of(0, 20);
+        when(deploymentRepository.findAll(pageable))
+                .thenReturn(new org.springframework.data.domain.PageImpl<>(List.of(deployment)));
+
+        var page = service.listByOwner(OWNER_ID, pageable);
+
+        assertThat(page.getContent()).hasSize(1);
+        verify(deploymentRepository, never()).findByOwnerId(anyLong(), eq(pageable));
+    }
+
+    @Test
     void executeAsyncStaysSuccessWhenTunnelFails() {
         deployment.setTunnelName("my-tunnel");
         deployment.setTunnelHostname("my-tunnel.example.com");
