@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, Link } from 'react-router-dom'
 import { getMachines } from '../api/machines'
@@ -284,19 +285,52 @@ export default function Dashboard() {
           </div>
         ) : (
           <div className="divide-y divide-border">
-            {auditLog.content.map(a => (
-              <div key={a.id} className="flex items-center gap-3 px-5 py-2.5">
-                <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${a.success ? 'status-online' : 'status-error'}`}>
-                  {a.httpMethod}
-                </span>
-                <code className="text-xs font-mono text-foreground flex-1 truncate">{a.path}</code>
-                <span className="text-xs text-muted-foreground shrink-0">{a.username}</span>
-                <span className="text-[11px] text-muted-foreground shrink-0 w-14 text-right">{timeAgo(a.timestamp)}</span>
-              </div>
-            ))}
+            {auditLog.content.map(a => <AuditRow key={a.id} entry={a} />)}
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+function AuditRow({ entry: a }: { entry: import('../types').AuditEntry }) {
+  const [open, setOpen] = useState(false)
+  const hasDetail = !!(a.requestBody || a.responseBody || a.errorMessage)
+  return (
+    <div>
+      <div
+        className={`flex items-center gap-3 px-5 py-2.5 ${hasDetail ? 'cursor-pointer hover:bg-muted/20' : ''}`}
+        onClick={() => hasDetail && setOpen(v => !v)}
+      >
+        <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${a.success ? 'status-online' : 'status-error'}`}>
+          {a.httpMethod}
+        </span>
+        <code className="text-xs font-mono text-foreground flex-1 truncate">{a.path}</code>
+        <span className="text-xs text-muted-foreground shrink-0">{a.username}</span>
+        <span className="text-[11px] text-muted-foreground shrink-0">{new Date(a.timestamp).toLocaleString()}</span>
+      </div>
+      {open && (
+        <div className="px-5 pb-3 space-y-2">
+          {a.requestBody && (
+            <div>
+              <p className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Request</p>
+              <pre className="text-[11px] font-mono bg-muted/20 rounded-md p-2 overflow-x-auto whitespace-pre-wrap break-all">{a.requestBody}</pre>
+            </div>
+          )}
+          {a.responseBody && (
+            <div>
+              <p className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Response</p>
+              <pre className="text-[11px] font-mono bg-muted/20 rounded-md p-2 overflow-x-auto whitespace-pre-wrap break-all">{a.responseBody}</pre>
+            </div>
+          )}
+          {a.errorMessage && (
+            <div>
+              <p className="text-[10px] uppercase tracking-wide text-destructive mb-1">Error</p>
+              <pre className="text-[11px] font-mono bg-destructive/10 text-destructive rounded-md p-2 overflow-x-auto whitespace-pre-wrap break-all">{a.errorMessage}</pre>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
