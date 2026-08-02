@@ -125,6 +125,8 @@ export interface AuditEntry {
   path: string
   success: boolean
   errorMessage: string | null
+  requestBody: string | null
+  responseBody: string | null
   timestamp: string
 }
 
