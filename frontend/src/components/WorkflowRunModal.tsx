@@ -9,6 +9,8 @@ interface Props {
   repo: string
   runId: number
   runName: string
+  initialStatus: string
+  initialConclusion: string | null
   onClose: () => void
 }
 
@@ -73,7 +75,7 @@ function StepIcon({ status, conclusion }: { status: string; conclusion: string |
 
 const TERMINAL_JOB = ['completed']
 
-export default function WorkflowRunModal({ owner, repo, runId, runName, onClose }: Props) {
+export default function WorkflowRunModal({ owner, repo, runId, runName, initialStatus, initialConclusion, onClose }: Props) {
   const [selectedIdx, setSelectedIdx] = useState(0)
   const [autoFollow, setAutoFollow] = useState(true)
 
@@ -102,9 +104,13 @@ export default function WorkflowRunModal({ owner, repo, runId, runName, onClose 
     return out
   }, [jobs])
 
-  const allDone = !!jobs && jobs.every(j => TERMINAL_JOB.includes(j.status))
+  const allDone = !!jobs && jobs.length > 0 && jobs.every(j => TERMINAL_JOB.includes(j.status))
   const anyFailed = !!jobs && jobs.some(j => isFailureConclusion(j.conclusion))
-  const runStatus = !jobs || jobs.length === 0 ? 'queued' : allDone ? (anyFailed ? 'failure' : 'success') : 'in_progress'
+  // Jobs can take a moment to appear (or the run has none yet) — fall back to the run's own
+  // status/conclusion from the runs list instead of defaulting to "queued" while jobs are empty.
+  const runStatus = !jobs || jobs.length === 0
+    ? (initialStatus === 'completed' ? (isFailureConclusion(initialConclusion) ? 'failure' : 'success') : initialStatus)
+    : allDone ? (anyFailed ? 'failure' : 'success') : 'in_progress'
 
   // Auto-follow the currently running step
   useEffect(() => {
