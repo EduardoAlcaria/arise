@@ -6,6 +6,7 @@ import com.automationcenter.entity.LogLevel;
 import com.automationcenter.repository.DeploymentRepository;
 import com.automationcenter.repository.LogEntryRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -32,7 +33,7 @@ public class LogService {
         return logEntryRepository.findByDeploymentIdOrderByCreatedAtAsc(deploymentId);
     }
 
-    @org.springframework.transaction.annotation.Transactional
+    @Transactional
     public void deleteByDeploymentId(Long deploymentId) {
         logEntryRepository.deleteByDeploymentId(deploymentId);
     }
