@@ -387,7 +387,10 @@ export default function Deployments() {
                             )}
                             <p className="text-[10px] text-muted-foreground/60">{timeAgo(run.createdAt)}</p>
                           </div>
-                          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                          {/* Fixed width regardless of which action buttons render (tunnel/rollback are
+                              conditional) — otherwise the machine/time column shifts per row since it
+                              sits between this and the flexible left block. */}
+                          <div className="flex items-center justify-end gap-1 w-[150px] shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
                             <button
                               onClick={() => setWatching({ id: run.id, name: run.name })}
                               title={['BUILDING', 'DEPLOYING', 'PENDING'].includes(run.status) ? 'Watch live' : 'View logs'}
