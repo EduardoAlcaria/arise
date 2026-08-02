@@ -4,7 +4,9 @@ import com.automationcenter.entity.AuditEntry;
 import com.automationcenter.entity.User;
 import com.automationcenter.repository.AuditEntryRepository;
 import com.automationcenter.util.SecretRedactor;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -33,10 +35,12 @@ public class AuditAspect {
 
     private static final int MAX_BODY_LENGTH = 4000;
 
-    // Catches secret-shaped JSON fields (privateKey, githubToken, password, clientSecret, ...)
-    // by key name — SecretRedactor only matches known token *formats*, not arbitrary field values.
-    private static final java.util.regex.Pattern SENSITIVE_FIELD = java.util.regex.Pattern.compile(
-            "(?i)\"([^\"]*(?:key|secret|token|password|credential)[^\"]*)\"\\s*:\\s*\"[^\"]*\"");
+    // Catches secret-shaped JSON fields (privateKey, githubToken, password, JWT in login
+    // responses, ...) by key name, at any nesting depth and regardless of value type —
+    // SecretRedactor only matches known token *formats* inside free text, not field identity.
+    private static final java.util.Set<String> SENSITIVE_KEYWORDS = java.util.Set.of(
+            "key", "secret", "token", "password", "credential", "authorization",
+            "bearer", "cookie", "session", "otp", "pin", "hash", "refresh", "access");
 
     @Around("within(com.automationcenter.controller..*) && "
             + "(@annotation(org.springframework.web.bind.annotation.PostMapping) "
@@ -73,12 +77,37 @@ public class AuditAspect {
         if (filtered.length == 0) return null;
         try {
             Object toWrite = value instanceof Object[] ? filtered : filtered[0];
-            String json = objectMapper.writeValueAsString(toWrite);
-            String redacted = SecretRedactor.redact(SENSITIVE_FIELD.matcher(json).replaceAll("\"$1\":\"***REDACTED***\""));
+            JsonNode tree = objectMapper.valueToTree(toWrite);
+            redactSensitiveFields(tree);
+            String redacted = SecretRedactor.redact(objectMapper.writeValueAsString(tree));
             return redacted.length() > MAX_BODY_LENGTH ? redacted.substring(0, MAX_BODY_LENGTH) + "…" : redacted;
         } catch (Exception e) {
             return null;
         }
+    }
+
+    /** Walks the JSON tree and blanks any field whose name looks sensitive, at any depth,
+     * regardless of whether the value is a string, number, or nested object/array. */
+    private void redactSensitiveFields(JsonNode node) {
+        if (node.isObject()) {
+            ObjectNode obj = (ObjectNode) node;
+            var fieldNames = new java.util.ArrayList<String>();
+            obj.fieldNames().forEachRemaining(fieldNames::add);
+            for (String name : fieldNames) {
+                if (isSensitiveKey(name)) {
+                    obj.put(name, "***REDACTED***");
+                } else {
+                    redactSensitiveFields(obj.get(name));
+                }
+            }
+        } else if (node.isArray()) {
+            node.forEach(this::redactSensitiveFields);
+        }
+    }
+
+    private boolean isSensitiveKey(String name) {
+        String lower = name.toLowerCase();
+        return SENSITIVE_KEYWORDS.stream().anyMatch(lower::contains);
     }
 
     private void recordAudit(String httpMethod, String path, boolean success, String errorMessage,
