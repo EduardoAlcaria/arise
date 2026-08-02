@@ -1,14 +1,15 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
-  getWorkflows, getWorkflowRuns, getWorkflowJobs, getJobLogs, listRunners, listAllRunners,
+  getWorkflows, getWorkflowRuns, listRunners, listAllRunners,
   rerunWorkflow, triggerWorkflow, triggerByPush, deleteRunner, setupRunner, getRunnerSession,
-  type WorkflowRun, type WorkflowJob, type Runner,
+  type WorkflowRun, type Runner,
 } from '../api/cicd'
 import { getRepos } from '../api/github'
 import { getMachines } from '../api/machines'
+import WorkflowRunModal from '../components/WorkflowRunModal'
 import {
-  GitBranch, Play, RotateCcw, Trash2, ChevronDown, ChevronRight,
+  GitBranch, Play, RotateCcw, Trash2,
   CheckCircle2, XCircle, Clock, Loader2, Circle, Server, Workflow,
   Zap, RefreshCw, AlertTriangle, Copy, Check, X,
 } from 'lucide-react'
@@ -63,127 +64,42 @@ function conclusionLabel(status: string, conclusion: string | null): string {
 // ── Run row with expandable jobs ──────────────────────────────────────────────
 
 function RunRow({
-  run, owner, repo,
+  run,
   onRerun,
+  onOpen,
 }: {
   run: WorkflowRun
-  owner: string
-  repo: string
   onRerun: (runId: number) => void
+  onOpen: () => void
 }) {
-  const [open, setOpen] = useState(false)
-
-  const { data: jobs, isLoading: jobsLoading } = useQuery({
-    queryKey: ['cicd-jobs', owner, repo, run.id],
-    queryFn: () => getWorkflowJobs(owner, repo, run.id),
-    enabled: open,
-    staleTime: 15_000,
-  })
-
   return (
-    <div className="border border-border rounded-lg overflow-hidden">
-      <div
-        className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-muted/30 transition-colors"
-        onClick={() => setOpen(v => !v)}
-      >
-        <StatusIcon status={run.status} conclusion={run.conclusion} />
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-sm font-medium text-foreground truncate">{run.name}</span>
-            <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium uppercase tracking-wide ${statusBadge(run.status, run.conclusion)}`}>
-              {conclusionLabel(run.status, run.conclusion)}
-            </span>
-          </div>
-          <div className="flex items-center gap-3 mt-0.5 text-xs text-muted-foreground">
-            <span className="flex items-center gap-1">
-              <GitBranch size={10} /> {run.headBranch}
-            </span>
-            <span>{run.event}</span>
-            <span>{timeAgo(run.createdAt)}</span>
-          </div>
+    <div
+      className="flex items-center gap-3 px-4 py-3 border border-border rounded-lg cursor-pointer hover:bg-muted/30 transition-colors"
+      onClick={onOpen}
+    >
+      <StatusIcon status={run.status} conclusion={run.conclusion} />
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-sm font-medium text-foreground truncate">{run.name}</span>
+          <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium uppercase tracking-wide ${statusBadge(run.status, run.conclusion)}`}>
+            {conclusionLabel(run.status, run.conclusion)}
+          </span>
         </div>
-        <button
-          onClick={e => { e.stopPropagation(); onRerun(run.id) }}
-          title="Re-run"
-          className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
-        >
-          <RotateCcw size={13} />
-        </button>
-        {open ? <ChevronDown size={14} className="text-muted-foreground shrink-0" /> : <ChevronRight size={14} className="text-muted-foreground shrink-0" />}
+        <div className="flex items-center gap-3 mt-0.5 text-xs text-muted-foreground">
+          <span className="flex items-center gap-1">
+            <GitBranch size={10} /> {run.headBranch}
+          </span>
+          <span>{run.event}</span>
+          <span>{timeAgo(run.createdAt)}</span>
+        </div>
       </div>
-
-      {open && (
-        <div className="border-t border-border bg-muted/10 px-4 py-3 space-y-2">
-          {jobsLoading && (
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <Loader2 size={12} className="animate-spin" /> Loading jobs…
-            </div>
-          )}
-          {jobs?.map(job => (
-            <JobRow key={job.id} job={job} owner={owner} repo={repo} />
-          ))}
-          {jobs?.length === 0 && (
-            <p className="text-xs text-muted-foreground">No jobs found.</p>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ── Job row with steps ────────────────────────────────────────────────────────
-
-function JobRow({ job, owner, repo }: { job: WorkflowJob; owner: string; repo: string }) {
-  const [open, setOpen] = useState(false)
-  const [showLogs, setShowLogs] = useState(false)
-
-  const { data: logs, isLoading: logsLoading } = useQuery({
-    queryKey: ['cicd-job-logs', owner, repo, job.id],
-    queryFn: () => getJobLogs(owner, repo, job.id),
-    enabled: showLogs,
-    staleTime: 15_000,
-  })
-
-  return (
-    <div className="border border-border/50 rounded-md overflow-hidden">
-      <div
-        className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-muted/20 transition-colors"
-        onClick={() => setOpen(v => !v)}
+      <button
+        onClick={e => { e.stopPropagation(); onRerun(run.id) }}
+        title="Re-run"
+        className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
       >
-        <StatusIcon status={job.status} conclusion={job.conclusion} />
-        <span className="flex-1 text-xs font-medium text-foreground truncate">{job.name}</span>
-        <button
-          onClick={e => { e.stopPropagation(); setShowLogs(v => !v); if (!open) setOpen(true) }}
-          className="text-[10px] text-muted-foreground hover:text-primary transition-colors shrink-0"
-        >
-          {showLogs ? 'Hide logs' : 'Logs'}
-        </button>
-        {job.steps && job.steps.length > 0 && (
-          open ? <ChevronDown size={12} className="text-muted-foreground shrink-0" /> : <ChevronRight size={12} className="text-muted-foreground shrink-0" />
-        )}
-      </div>
-      {open && job.steps && (
-        <div className="border-t border-border/50 px-3 py-2 space-y-1">
-          {job.steps.sort((a, b) => a.number - b.number).map(step => (
-            <div key={step.number} className="flex items-center gap-2">
-              <StatusIcon status={step.status} conclusion={step.conclusion} />
-              <span className="text-[11px] text-muted-foreground truncate">{step.name}</span>
-            </div>
-          ))}
-        </div>
-      )}
-      {showLogs && (
-        <div className="border-t border-border/50 bg-black/90 px-3 py-2 max-h-96 overflow-auto">
-          {logsLoading && (
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <Loader2 size={12} className="animate-spin" /> Loading logs…
-            </div>
-          )}
-          {logs && (
-            <pre className="text-[10.5px] leading-relaxed text-green-400 font-mono whitespace-pre-wrap">{logs}</pre>
-          )}
-        </div>
-      )}
+        <RotateCcw size={13} />
+      </button>
     </div>
   )
 }
@@ -490,6 +406,7 @@ export default function CiCd() {
   function changeRepo(r: string) { setSelectedRepo(r); localStorage.setItem('cicd:repo', r) }
   const [showTrigger, setShowTrigger] = useState(false)
   const [showSetupRunner, setShowSetupRunner] = useState(false)
+  const [watchingRun, setWatchingRun] = useState<{ id: number; name: string } | null>(null)
 
   const { data: ghRepos, isLoading: ghReposLoading } = useQuery({
     queryKey: ['github-repos'],
@@ -664,9 +581,8 @@ export default function CiCd() {
                 <RunRow
                   key={run.id}
                   run={run}
-                  owner={owner}
-                  repo={repo}
                   onRerun={id => rerunMut.mutate(id)}
+                  onOpen={() => setWatchingRun({ id: run.id, name: run.name })}
                 />
               ))}
             </div>
@@ -749,6 +665,15 @@ export default function CiCd() {
           owner={owner}
           repo={repo}
           onClose={() => setShowSetupRunner(false)}
+        />
+      )}
+      {watchingRun && (
+        <WorkflowRunModal
+          owner={owner}
+          repo={repo}
+          runId={watchingRun.id}
+          runName={watchingRun.name}
+          onClose={() => setWatchingRun(null)}
         />
       )}
     </div>
