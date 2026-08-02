@@ -142,6 +142,9 @@ class DeploymentServiceTest {
         service.executeAsync(DEPLOYMENT_ID);
 
         assertThat(deployment.getStatus()).isEqualTo(DeploymentStatus.FAILED);
+        // Failed deployment's own containers get torn down so they don't linger as orphans
+        // alongside the restored previous version.
+        verify(sshService).execute(eq(machine), eq("cd '/tmp/deploy_100' && docker compose down --remove-orphans 2>&1"), anyLong());
         verify(sshService).execute(eq(machine), eq("cd '/tmp/deploy_77' && docker compose up -d 2>&1"), anyLong());
     }
 
