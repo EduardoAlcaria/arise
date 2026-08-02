@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
-  getWorkflows, getWorkflowRuns, getWorkflowJobs, listRunners, listAllRunners,
+  getWorkflows, getWorkflowRuns, getWorkflowJobs, getJobLogs, listRunners, listAllRunners,
   rerunWorkflow, triggerWorkflow, triggerByPush, deleteRunner, setupRunner, getRunnerSession,
   type WorkflowRun, type WorkflowJob, type Runner,
 } from '../api/cicd'
@@ -120,7 +120,7 @@ function RunRow({
             </div>
           )}
           {jobs?.map(job => (
-            <JobRow key={job.id} job={job} />
+            <JobRow key={job.id} job={job} owner={owner} repo={repo} />
           ))}
           {jobs?.length === 0 && (
             <p className="text-xs text-muted-foreground">No jobs found.</p>
@@ -133,8 +133,17 @@ function RunRow({
 
 // ── Job row with steps ────────────────────────────────────────────────────────
 
-function JobRow({ job }: { job: WorkflowJob }) {
+function JobRow({ job, owner, repo }: { job: WorkflowJob; owner: string; repo: string }) {
   const [open, setOpen] = useState(false)
+  const [showLogs, setShowLogs] = useState(false)
+
+  const { data: logs, isLoading: logsLoading } = useQuery({
+    queryKey: ['cicd-job-logs', owner, repo, job.id],
+    queryFn: () => getJobLogs(owner, repo, job.id),
+    enabled: showLogs,
+    staleTime: 15_000,
+  })
+
   return (
     <div className="border border-border/50 rounded-md overflow-hidden">
       <div
@@ -143,15 +152,12 @@ function JobRow({ job }: { job: WorkflowJob }) {
       >
         <StatusIcon status={job.status} conclusion={job.conclusion} />
         <span className="flex-1 text-xs font-medium text-foreground truncate">{job.name}</span>
-        <a
-          href={job.htmlUrl}
-          target="_blank"
-          rel="noreferrer"
-          onClick={e => e.stopPropagation()}
+        <button
+          onClick={e => { e.stopPropagation(); setShowLogs(v => !v); if (!open) setOpen(true) }}
           className="text-[10px] text-muted-foreground hover:text-primary transition-colors shrink-0"
         >
-          View ↗
-        </a>
+          {showLogs ? 'Hide logs' : 'Logs'}
+        </button>
         {job.steps && job.steps.length > 0 && (
           open ? <ChevronDown size={12} className="text-muted-foreground shrink-0" /> : <ChevronRight size={12} className="text-muted-foreground shrink-0" />
         )}
@@ -164,6 +170,18 @@ function JobRow({ job }: { job: WorkflowJob }) {
               <span className="text-[11px] text-muted-foreground truncate">{step.name}</span>
             </div>
           ))}
+        </div>
+      )}
+      {showLogs && (
+        <div className="border-t border-border/50 bg-black/90 px-3 py-2 max-h-96 overflow-auto">
+          {logsLoading && (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Loader2 size={12} className="animate-spin" /> Loading logs…
+            </div>
+          )}
+          {logs && (
+            <pre className="text-[10.5px] leading-relaxed text-green-400 font-mono whitespace-pre-wrap">{logs}</pre>
+          )}
         </div>
       )}
     </div>
