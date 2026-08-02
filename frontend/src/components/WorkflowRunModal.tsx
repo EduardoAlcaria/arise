@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { getWorkflowJobs, getJobLogs } from '../api/cicd'
 import { errorMessage } from './ErrorBanner'
-import { X, CheckCircle2, XCircle, Loader2, Circle, Clock, AlertTriangle, ArrowDown, ChevronDown, ChevronRight } from 'lucide-react'
+import { X, CheckCircle2, XCircle, Loader2, Circle, Clock, AlertTriangle, ChevronDown, ChevronRight } from 'lucide-react'
 
 interface Props {
   owner: string
@@ -23,96 +23,75 @@ function stripAnsi(line: string): string {
   return line.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, '')
 }
 
-// GitHub's own log view renders group markers as collapsible headers; we just drop the marker
-// text and keep the content, so nothing in the output is hidden.
 function cleanLine(line: string): string {
   return stripAnsi(stripTimestamp(line))
-    .replace(/##\[group\]/g, '')
-    .replace(/##\[endgroup\]/g, '')
-    .replace(/##\[(error|warning|notice|debug|command)\]/g, '')
-}
-
-// Any conclusion other than 'success' (and non-null) counts as a failure for badge coloring —
-// GitHub uses several: failure, cancelled, timed_out, action_required, stale, startup_failure.
-function isFailureConclusion(conclusion: string | null): boolean {
-  return !!conclusion && conclusion !== 'success' && conclusion !== 'skipped' && conclusion !== 'neutral'
+    .replace(/##\[(group|endgroup|error|warning|notice|debug|command|section)\]/g, '')
 }
 
 function lineColor(raw: string): string {
   if (raw.includes('##[error]')) return '#f87171'
   if (raw.includes('##[warning]')) return '#fbbf24'
-  if (raw.includes('##[group]')) return '#93c5fd'
   return '#d4d4d4'
 }
 
-interface LogBlock {
-  /** Group header text, or null for output that sits outside any group. */
-  title: string | null
-  /** Raw lines (uncleaned) — every line of the job log lands in exactly one block. */
-  lines: string[]
+function isFailureConclusion(conclusion: string | null): boolean {
+  return !!conclusion && conclusion !== 'success' && conclusion !== 'skipped' && conclusion !== 'neutral'
 }
 
 /**
- * Splits the job log into display blocks WITHOUT dropping anything: each top-level
- * ##[group] becomes a collapsible block, everything else becomes a plain block.
- * Nested groups (Docker BuildKit emits its own) stay as content inside their parent
- * rather than starting a new block, so no output is lost or duplicated.
+ * Slices a job log into one chunk per step.
+ *
+ * GitHub's raw job log marks each step with a `##[group]Run <cmd>` header, but the group only
+ * wraps the *command echo* — the step's real output comes AFTER its `##[endgroup]`, up to the
+ * next top-level group. So a step's chunk runs from its own group header until the next one,
+ * which keeps the command AND its output together. Nested groups (Docker BuildKit emits its
+ * own per build stage) are plain content, never boundaries.
  */
-function splitIntoBlocks(raw: string): LogBlock[] {
-  const blocks: LogBlock[] = []
-  let current: LogBlock = { title: null, lines: [] }
+function sliceByStep(raw: string): string[][] {
+  const chunks: string[][] = []
+  let current: string[] = []
   let depth = 0
 
-  const flush = () => {
-    if (current.title !== null || current.lines.some(l => l.trim())) blocks.push(current)
-  }
-
   for (const line of raw.split('\n')) {
-    const open = line.match(/##\[group\](.*)$/)
-    if (open) {
+    if (/##\[group\]/.test(line)) {
       if (depth === 0) {
-        flush()
-        current = { title: stripAnsi(open[1]).trim() || 'group', lines: [] }
-      } else {
-        current.lines.push(line)
+        if (current.length) chunks.push(current)
+        current = []
       }
       depth++
+      current.push(line)
       continue
     }
     if (line.includes('##[endgroup]')) {
       depth = Math.max(0, depth - 1)
-      if (depth === 0) {
-        flush()
-        current = { title: null, lines: [] }
-      } else {
-        current.lines.push(line)
-      }
-      continue
+      continue // marker itself carries no content
     }
-    current.lines.push(line)
+    current.push(line)
   }
-  flush()
-  return blocks
+  if (current.length) chunks.push(current)
+
+  // Anything before the very first group (rare preamble) isn't a step — fold it into the first.
+  return chunks
 }
 
-function StepIcon({ status, conclusion }: { status: string; conclusion: string | null }) {
-  if (status === 'in_progress') return <Loader2 size={14} className="animate-spin text-primary shrink-0" />
-  if (status === 'queued') return <Clock size={14} className="text-yellow-500 shrink-0" />
+function StepIcon({ status, conclusion, size = 14 }: { status: string; conclusion: string | null; size?: number }) {
+  if (status === 'in_progress') return <Loader2 size={size} className="animate-spin text-primary shrink-0" />
+  if (status === 'queued') return <Clock size={size} className="text-yellow-500 shrink-0" />
   if (status === 'completed') {
-    if (conclusion === 'success') return <CheckCircle2 size={14} className="text-green-500 shrink-0" />
-    if (isFailureConclusion(conclusion)) return <XCircle size={14} className="text-destructive shrink-0" />
-    return <AlertTriangle size={14} className="text-yellow-500 shrink-0" />
+    if (conclusion === 'success') return <CheckCircle2 size={size} className="text-green-500 shrink-0" />
+    if (isFailureConclusion(conclusion)) return <XCircle size={size} className="text-destructive shrink-0" />
+    return <AlertTriangle size={size} className="text-yellow-500 shrink-0" />
   }
-  return <Circle size={14} className="text-muted-foreground shrink-0" />
+  return <Circle size={size} className="text-muted-foreground shrink-0" />
 }
 
 const TERMINAL_JOB = ['completed']
 
 export default function WorkflowRunModal({ owner, repo, runId, runName, initialStatus, initialConclusion, onClose }: Props) {
   const [selectedJobId, setSelectedJobId] = useState<number | null>(null)
-  const [autoScroll, setAutoScroll] = useState(true)
-  const scrollRef = useRef<HTMLDivElement>(null)
-  const bottomRef = useRef<HTMLDivElement>(null)
+  const [expanded, setExpanded] = useState<Set<number>>(new Set())
+  const [autoExpandDone, setAutoExpandDone] = useState(false)
+  const stepRefs = useRef<Map<number, HTMLDivElement>>(new Map())
 
   const { data: jobs } = useQuery({
     queryKey: ['cicd-run-jobs', owner, repo, runId],
@@ -126,13 +105,10 @@ export default function WorkflowRunModal({ owner, repo, runId, runName, initialS
 
   const allDone = !!jobs && jobs.length > 0 && jobs.every(j => TERMINAL_JOB.includes(j.status))
   const anyFailed = !!jobs && jobs.some(j => isFailureConclusion(j.conclusion))
-  // Jobs can take a moment to appear (or the run has none yet) — fall back to the run's own
-  // status/conclusion from the runs list instead of defaulting to "queued" while jobs are empty.
   const runStatus = !jobs || jobs.length === 0
     ? (initialStatus === 'completed' ? (isFailureConclusion(initialConclusion) ? 'failure' : 'success') : initialStatus)
     : allDone ? (anyFailed ? 'failure' : 'success') : 'in_progress'
 
-  // Default to the running job, else the first one.
   useEffect(() => {
     if (selectedJobId !== null || !jobs?.length) return
     setSelectedJobId((jobs.find(j => j.status === 'in_progress') ?? jobs[0]).id)
@@ -141,10 +117,10 @@ export default function WorkflowRunModal({ owner, repo, runId, runName, initialS
   const selectedJob = jobs?.find(j => j.id === selectedJobId) ?? null
   const jobDone = selectedJob?.status === 'completed'
   const jobStarted = selectedJob ? selectedJob.status !== 'queued' : false
+  const steps = useMemo(() => selectedJob?.steps ?? [], [selectedJob])
 
-  // GitHub's API has no per-step streaming endpoint — the documented approach is to re-download
-  // the job log every few seconds while the job runs. Poll here and render the WHOLE log,
-  // unsliced, so nothing the runner printed is hidden.
+  // GitHub has no per-step streaming endpoint — re-download the job log every few seconds while
+  // it runs, which is the documented way to approximate live logs.
   const { data: rawLog, isFetching: logFetching, error: logError } = useQuery({
     queryKey: ['cicd-run-job-log', owner, repo, selectedJobId],
     queryFn: () => getJobLogs(owner, repo, selectedJobId!),
@@ -154,37 +130,43 @@ export default function WorkflowRunModal({ owner, repo, runId, runName, initialS
     retry: false,
   })
 
-  const blocks = useMemo(() => (rawLog ? splitIntoBlocks(rawLog) : []), [rawLog])
-  const totalLines = useMemo(() => blocks.reduce((n, b) => n + b.lines.length, 0), [blocks])
+  const chunks = useMemo(() => (rawLog ? sliceByStep(rawLog) : []), [rawLog])
 
-  const [collapsed, setCollapsed] = useState<Set<number>>(new Set())
-  const blockRefs = useRef<Map<number, HTMLDivElement>>(new Map())
+  /** Chunks appear in step order; extra trailing chunks fold into the last step. */
+  const linesForStep = (idx: number): string[] => {
+    if (!chunks.length) return []
+    if (idx < steps.length - 1) return chunks[idx] ?? []
+    return chunks.slice(idx).flat()
+  }
 
-  const toggleBlock = (i: number) =>
-    setCollapsed(prev => {
+  // Reset expansion when switching jobs so state doesn't leak across them.
+  useEffect(() => {
+    setExpanded(new Set())
+    setAutoExpandDone(false)
+  }, [selectedJobId])
+
+  // Like GitHub: successful steps stay collapsed, the failing (or currently running) one opens.
+  useEffect(() => {
+    if (autoExpandDone || !steps.length || !chunks.length) return
+    const failing = steps.findIndex(s => isFailureConclusion(s.conclusion))
+    const running = steps.findIndex(s => s.status === 'in_progress')
+    const target = failing >= 0 ? failing : running
+    if (target >= 0) {
+      setExpanded(new Set([target]))
+      setAutoExpandDone(true)
+      requestAnimationFrame(() => stepRefs.current.get(target)?.scrollIntoView({ behavior: 'smooth', block: 'center' }))
+    }
+  }, [steps, chunks.length, autoExpandDone])
+
+  const toggle = (i: number) =>
+    setExpanded(prev => {
       const next = new Set(prev)
       if (next.has(i)) next.delete(i); else next.add(i)
       return next
     })
 
-  /** Sidebar step N maps to the Nth titled block, since GitHub emits one group per step in order. */
-  const scrollToStep = (stepIdx: number) => {
-    const titled = blocks.map((b, i) => (b.title !== null ? i : -1)).filter(i => i >= 0)
-    const target = titled[stepIdx]
-    if (target === undefined) return
-    setAutoScroll(false)
-    blockRefs.current.get(target)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  }
-
-  useEffect(() => {
-    if (autoScroll) bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [totalLines, autoScroll])
-
-  const onScroll = () => {
-    const el = scrollRef.current
-    if (!el) return
-    setAutoScroll(el.scrollHeight - el.scrollTop - el.clientHeight < 60)
-  }
+  const expandAll = () => setExpanded(new Set(steps.map((_, i) => i)))
+  const collapseAll = () => setExpanded(new Set())
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60">
@@ -212,129 +194,108 @@ export default function WorkflowRunModal({ owner, repo, runId, runName, initialS
 
         {/* Body */}
         <div className="flex flex-1 min-h-0">
-          {/* Sidebar: jobs (selectable) + their steps (status only) */}
-          <div className="flex flex-col shrink-0 overflow-y-auto border-r border-border" style={{ width: 280 }}>
+          {/* Sidebar: jobs only (steps live in the main pane, like GitHub) */}
+          <div className="flex flex-col shrink-0 overflow-y-auto border-r border-border" style={{ width: 220 }}>
+            <div className="px-4 py-2 text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border">
+              Jobs
+            </div>
             {!jobs ? (
               <div className="flex items-center gap-2 px-4 py-6 text-xs text-muted-foreground">
-                <Loader2 size={12} className="animate-spin" /> Loading jobs…
+                <Loader2 size={12} className="animate-spin" /> Loading…
               </div>
             ) : (
               jobs.map(job => {
                 const active = job.id === selectedJobId
                 return (
-                  <div key={job.id}>
-                    <button
-                      onClick={() => { setSelectedJobId(job.id); setAutoScroll(true) }}
-                      className={`flex items-center gap-2 px-4 py-2 w-full text-left border-b border-border transition-colors ${
-                        active ? 'bg-muted/40 border-l-2 border-l-primary' : 'bg-muted/10 border-l-2 border-l-transparent hover:bg-muted/20'
-                      }`}
-                    >
-                      <StepIcon status={job.status} conclusion={job.conclusion} />
-                      <span className="text-[12px] font-semibold text-foreground truncate">{job.name}</span>
-                    </button>
-                    {(job.steps ?? []).map((step, si) => (
-                      <button
-                        key={`${job.id}-${step.number}`}
-                        onClick={() => { setSelectedJobId(job.id); scrollToStep(si) }}
-                        disabled={!active}
-                        title={active ? 'Jump to this step in the log' : 'Select this job first'}
-                        className="flex items-center gap-2.5 pl-7 pr-4 py-2 w-full text-left border-b border-border/50 transition-colors hover:bg-muted/20 disabled:hover:bg-transparent"
-                      >
-                        <StepIcon status={step.status} conclusion={step.conclusion} />
-                        <span className="text-[12px] text-muted-foreground truncate">{step.name}</span>
-                      </button>
-                    ))}
-                  </div>
+                  <button
+                    key={job.id}
+                    onClick={() => setSelectedJobId(job.id)}
+                    className={`flex items-center gap-2 px-4 py-2.5 w-full text-left border-b border-border/50 transition-colors ${
+                      active ? 'bg-muted/40 border-l-2 border-l-primary' : 'border-l-2 border-l-transparent hover:bg-muted/20'
+                    }`}
+                  >
+                    <StepIcon status={job.status} conclusion={job.conclusion} />
+                    <span className={`text-[12px] truncate ${active ? 'text-foreground font-medium' : 'text-muted-foreground'}`}>
+                      {job.name}
+                    </span>
+                  </button>
                 )
               })
             )}
           </div>
 
-          {/* Log panel — full job output, dark/monospace regardless of theme */}
+          {/* Main pane: one collapsible row per step, GitHub-style */}
           <div className="flex-1 flex flex-col min-w-0 min-h-0 bg-[#0a0a0a]">
             {!selectedJob ? (
-              <div className="flex items-center justify-center h-full text-xs text-muted-foreground">
-                Select a job to view its logs
-              </div>
+              <div className="flex items-center justify-center h-full text-xs text-muted-foreground">Select a job</div>
             ) : !jobStarted ? (
               <div className="flex flex-col items-center justify-center h-full gap-2 text-xs text-muted-foreground">
                 <Clock size={16} /> Queued — hasn't started yet
               </div>
-            ) : totalLines > 0 ? (
-              <>
-                <div
-                  ref={scrollRef}
-                  onScroll={onScroll}
-                  className="flex-1 overflow-y-auto font-mono text-[12px] leading-relaxed px-4 py-3"
-                >
-                  {(() => {
-                    let lineNo = 0
-                    return blocks.map((block, bi) => {
-                      const isCollapsed = collapsed.has(bi)
-                      const start = lineNo
-                      lineNo += block.lines.length
-                      return (
-                        <div key={bi} ref={el => { if (el) blockRefs.current.set(bi, el) }} className="mb-1">
-                          {block.title !== null && (
-                            <button
-                              onClick={() => toggleBlock(bi)}
-                              className="flex items-center gap-2 w-full text-left px-1 -mx-1 py-0.5 rounded hover:bg-white/5"
-                            >
-                              {isCollapsed
-                                ? <ChevronRight size={12} className="shrink-0 text-neutral-500" />
-                                : <ChevronDown size={12} className="shrink-0 text-neutral-500" />}
-                              <span className="text-[12px] font-semibold text-sky-300 truncate">{block.title}</span>
-                              <span className="text-[10px] text-neutral-600 shrink-0">{block.lines.length}</span>
-                            </button>
-                          )}
-                          {!isCollapsed && block.lines.map((line, li) => (
-                            <div key={li} className="flex gap-3 hover:bg-white/5 px-1 -mx-1 rounded">
-                              <span className="select-none text-right shrink-0 w-10 text-neutral-600" style={{ fontSize: 11 }}>
-                                {start + li + 1}
-                              </span>
-                              <span style={{ color: lineColor(line), whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-                                {cleanLine(line)}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      )
-                    })
-                  })()}
-                  <div ref={bottomRef} />
-                </div>
-                <div className="flex items-center justify-between px-4 py-2 border-t border-border/30 shrink-0">
-                  <span className="text-[11px] text-neutral-500">
-                    {totalLines} line{totalLines !== 1 ? 's' : ''} · {blocks.filter(b => b.title !== null).length} section
-                    {blocks.filter(b => b.title !== null).length !== 1 ? 's' : ''}
-                    {!jobDone && ' · polling every 4s'}
-                  </span>
-                  {!autoScroll && (
-                    <button
-                      onClick={() => { setAutoScroll(true); bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }}
-                      className="flex items-center gap-1.5 text-[12px] text-primary transition-colors"
-                    >
-                      <ArrowDown size={12} /> Bottom
-                    </button>
-                  )}
-                </div>
-              </>
-            ) : logFetching ? (
+            ) : !chunks.length && logFetching ? (
               <div className="flex items-center justify-center h-full gap-2 text-xs text-muted-foreground">
                 <Loader2 size={12} className="animate-spin" /> Loading logs…
               </div>
-            ) : logError ? (
+            ) : !chunks.length && logError ? (
               <div className="flex items-center justify-center h-full text-xs text-destructive px-6 text-center">
                 {errorMessage(logError, 'Failed to load logs.')}
               </div>
-            ) : jobDone ? (
-              <div className="flex items-center justify-center h-full text-xs text-muted-foreground">
-                No log output for this job.
+            ) : !chunks.length ? (
+              <div className="flex items-center justify-center h-full gap-2 text-xs text-muted-foreground">
+                {jobDone ? 'No log output for this job.' : <><Loader2 size={12} className="animate-spin" /> No output yet…</>}
               </div>
             ) : (
-              <div className="flex items-center justify-center h-full gap-2 text-xs text-muted-foreground">
-                <Loader2 size={12} className="animate-spin" /> No output yet — still running…
-              </div>
+              <>
+                <div className="flex items-center justify-end gap-3 px-4 py-1.5 border-b border-white/5 shrink-0">
+                  <button onClick={expandAll} className="text-[11px] text-neutral-400 hover:text-neutral-200">Expand all</button>
+                  <button onClick={collapseAll} className="text-[11px] text-neutral-400 hover:text-neutral-200">Collapse all</button>
+                </div>
+                <div className="flex-1 overflow-y-auto">
+                  {steps.map((step, i) => {
+                    const open = expanded.has(i)
+                    const lines = linesForStep(i)
+                    return (
+                      <div
+                        key={`${step.number}-${step.name}`}
+                        ref={el => { if (el) stepRefs.current.set(i, el) }}
+                        className="border-b border-white/5"
+                      >
+                        <button
+                          onClick={() => toggle(i)}
+                          className="flex items-center gap-2.5 w-full text-left px-4 py-2.5 hover:bg-white/5 transition-colors"
+                        >
+                          {open
+                            ? <ChevronDown size={13} className="shrink-0 text-neutral-500" />
+                            : <ChevronRight size={13} className="shrink-0 text-neutral-500" />}
+                          <StepIcon status={step.status} conclusion={step.conclusion} size={13} />
+                          <span className="flex-1 text-[13px] text-neutral-200 truncate">{step.name}</span>
+                          <span className="text-[10px] text-neutral-600 shrink-0">
+                            {lines.length ? `${lines.length} lines` : '—'}
+                          </span>
+                        </button>
+                        {open && (
+                          <div className="font-mono text-[12px] leading-relaxed px-4 py-2 bg-black/40">
+                            {lines.length === 0 ? (
+                              <span className="text-neutral-600">No output for this step.</span>
+                            ) : (
+                              lines.map((line, li) => (
+                                <div key={li} className="flex gap-3 hover:bg-white/5 px-1 -mx-1 rounded">
+                                  <span className="select-none text-right shrink-0 w-8 text-neutral-700" style={{ fontSize: 11 }}>
+                                    {li + 1}
+                                  </span>
+                                  <span style={{ color: lineColor(line), whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                                    {cleanLine(line)}
+                                  </span>
+                                </div>
+                              ))
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              </>
             )}
           </div>
         </div>
@@ -342,7 +303,8 @@ export default function WorkflowRunModal({ owner, repo, runId, runName, initialS
         {/* Footer */}
         <div className="flex items-center justify-between px-5 py-2.5 border-t border-border shrink-0">
           <span className="text-[11px] text-muted-foreground">
-            {jobs?.length ?? 0} job{(jobs?.length ?? 0) !== 1 ? 's' : ''}{!allDone && ' · live'}
+            {steps.length} step{steps.length !== 1 ? 's' : ''}
+            {!jobDone && jobStarted && ' · polling every 4s'}
           </span>
           <button onClick={onClose} className={allDone ? 'btn-primary text-xs py-1.5 px-3.5' : 'btn-ghost text-xs py-1.5 px-3.5'}>
             {allDone ? 'Close' : 'Hide'}
