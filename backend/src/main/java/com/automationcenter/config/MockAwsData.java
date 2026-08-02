@@ -12,13 +12,21 @@ public final class MockAwsData {
 
     private MockAwsData() {}
 
+    // In-memory only — reset on backend restart. Lets the demo account's EC2 start/stop/terminate
+    // actions actually change what listEc2Instances() returns, without needing real AWS credentials.
+    private static final Map<String, String> demoEc2State = new java.util.concurrent.ConcurrentHashMap<>();
+
     public static List<Map<String, Object>> ec2Instances(String region) {
         return List.of(
-                ec2("i-0a1b2c3d4e5f00001", "web-server-prod", "t3.medium", "running", "10.0.1.10", "54.210.11.22", region),
-                ec2("i-0a1b2c3d4e5f00002", "app-server-prod", "t3.large",  "running", "10.0.1.11", null,           region),
-                ec2("i-0a1b2c3d4e5f00003", "db-server-prod",  "r5.xlarge", "stopped", "10.0.2.5",  null,           region),
-                ec2("i-0a1b2c3d4e5f00004", "bastion",         "t3.micro",  "running", "10.0.0.5",  "3.88.41.99",  region)
+                ec2("i-0a1b2c3d4e5f00001", "web-server-prod", "t3.medium", demoEc2State.getOrDefault("i-0a1b2c3d4e5f00001", "running"), "10.0.1.10", "54.210.11.22", region),
+                ec2("i-0a1b2c3d4e5f00002", "app-server-prod", "t3.large",  demoEc2State.getOrDefault("i-0a1b2c3d4e5f00002", "running"), "10.0.1.11", null,           region),
+                ec2("i-0a1b2c3d4e5f00003", "db-server-prod",  "r5.xlarge", demoEc2State.getOrDefault("i-0a1b2c3d4e5f00003", "stopped"), "10.0.2.5",  null,           region),
+                ec2("i-0a1b2c3d4e5f00004", "bastion",         "t3.micro",  demoEc2State.getOrDefault("i-0a1b2c3d4e5f00004", "running"), "10.0.0.5",  "3.88.41.99",  region)
         );
+    }
+
+    public static void setEc2State(String instanceId, String state) {
+        demoEc2State.put(instanceId, state);
     }
 
     public static List<Map<String, Object>> s3Buckets() {
