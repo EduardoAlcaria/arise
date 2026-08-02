@@ -335,7 +335,12 @@ public class CicdService {
                                 log.warn("Job {} logs returned {} with no Location header", jobId, response.statusCode());
                                 return reactor.core.publisher.Mono.just("");
                             }
-                            return webClientBuilder.build().get().uri(location).retrieve().bodyToMono(String.class);
+                            // Pre-built URI (not .uri(String)) so the already-encoded SAS signature
+                            // in the query string isn't re-escaped — same class of bug as
+                            // QueueMetricsService's %2F handling. Re-encoding corrupts the
+                            // signature and Azure/S3 reject the request as AuthenticationFailed.
+                            return webClientBuilder.build().get().uri(java.net.URI.create(location))
+                                    .retrieve().bodyToMono(String.class);
                         }
                         if (response.statusCode().isError()) {
                             return response.bodyToMono(String.class).defaultIfEmpty("").flatMap(body ->
