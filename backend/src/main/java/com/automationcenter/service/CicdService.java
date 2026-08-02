@@ -314,6 +314,34 @@ public class CicdService {
         }).toList();
     }
 
+    /**
+     * GitHub's job-logs endpoint replies 302 with a Location pointing at a presigned,
+     * unauthenticated blob URL — WebClient doesn't auto-follow redirects, so it's handled
+     * explicitly here rather than sending the user to github.com to read logs.
+     */
+    public String getJobLogs(Long userId, String owner, String repo, Long jobId) {
+        User user = getUser(userId);
+        try {
+            return webClientBuilder.build()
+                    .get()
+                    .uri("https://api.github.com/repos/{owner}/{repo}/actions/jobs/{jobId}/logs", owner, repo, jobId)
+                    .header("Authorization", "token " + user.getGithubToken())
+                    .header("Accept", "application/vnd.github+json")
+                    .exchangeToMono(response -> {
+                        if (response.statusCode().is3xxRedirection()) {
+                            String location = response.headers().asHttpHeaders().getFirst("Location");
+                            if (location == null) return reactor.core.publisher.Mono.just("");
+                            return webClientBuilder.build().get().uri(location)
+                                    .retrieve().bodyToMono(String.class);
+                        }
+                        return response.bodyToMono(String.class);
+                    })
+                    .block();
+        } catch (WebClientResponseException e) {
+            throw new IllegalArgumentException("Failed to fetch job logs: HTTP " + e.getStatusCode().value());
+        }
+    }
+
     public List<Map<String, Object>> listRunners(Long userId, String owner, String repo) {
         User user = getUser(userId);
         @SuppressWarnings("unchecked")
