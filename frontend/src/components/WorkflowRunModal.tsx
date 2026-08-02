@@ -29,19 +29,37 @@ interface LogSection {
   lines: string[]
 }
 
-/** GitHub Actions raw logs wrap each step's output in ##[group]<name> / ##[endgroup] markers. */
-function parseGithubLog(raw: string): LogSection[] {
+/**
+ * GitHub Actions raw logs wrap each step's output in ##[group]<name> / ##[endgroup] markers —
+ * but tools like Docker Buildx/BuildKit ALSO emit their own ##[group]/##[endgroup] pairs inside
+ * a step's output (one per build stage, e.g. "#1 [internal] load..."), nested one level deep.
+ * Only treat a group as a step boundary if its name matches a real step from the job; anything
+ * else is nested tool output and stays attached to the current step instead of truncating it.
+ */
+function parseGithubLog(raw: string, knownStepNames: string[]): LogSection[] {
+  const known = new Set(knownStepNames.map(s => s.toLowerCase()))
   const lines = raw.split('\n')
   const sections: LogSection[] = []
   let current: LogSection | null = null
+  let nestDepth = 0
   for (const line of lines) {
     const groupMatch = line.match(/##\[group\](.*)$/)
     if (groupMatch) {
-      current = { name: groupMatch[1].trim(), lines: [] }
-      sections.push(current)
+      const name = groupMatch[1].trim()
+      if (nestDepth === 0 && known.has(name.toLowerCase())) {
+        current = { name, lines: [] }
+        sections.push(current)
+        continue
+      }
+      nestDepth++
+      current?.lines.push(line)
       continue
     }
-    if (line.includes('##[endgroup]')) { current = null; continue }
+    if (line.includes('##[endgroup]')) {
+      if (nestDepth > 0) { nestDepth--; current?.lines.push(line); continue }
+      current = null
+      continue
+    }
     if (!current) {
       if (!sections.length || sections[0].name !== '__pre__') sections.unshift({ name: '__pre__', lines: [] })
       sections[0].lines.push(line)
@@ -54,6 +72,14 @@ function parseGithubLog(raw: string): LogSection[] {
 
 function stripTimestamp(line: string): string {
   return line.replace(/^\d{4}-\d{2}-\d{2}T[\d:.]+Z\s?/, '')
+}
+
+function stripAnsi(line: string): string {
+  return line.replace(/\x1B\[[0-9;]*[mGKHF]/g, '')
+}
+
+function cleanLine(line: string): string {
+  return stripAnsi(stripTimestamp(line))
 }
 
 // Any conclusion other than 'success' (and non-null) counts as a failure for badge coloring —
@@ -120,18 +146,30 @@ export default function WorkflowRunModal({ owner, repo, runId, runName, initialS
   }, [steps, autoFollow])
 
   const selected = steps[selectedIdx] ?? null
+  const selectedJob = jobs?.find(j => j.id === selected?.jobId)
+  const jobDone = selectedJob?.status === 'completed'
+  const jobStarted = selectedJob ? selectedJob.status !== 'queued' : false
 
-  const jobDone = (jobId: number) => jobs?.find(j => j.id === jobId)?.status === 'completed'
-
-  const { data: rawLog, isLoading: logLoading, error: logError } = useQuery({
+  // GitHub streams job logs to blob storage progressively — try fetching even while the job
+  // is still running (not just once it completes), and keep polling until it's done so the
+  // view updates as more output becomes available, closer to GitHub's own live log view.
+  const { data: rawLog, isFetching: logLoading, error: logError } = useQuery({
     queryKey: ['cicd-run-job-log', owner, repo, selected?.jobId],
     queryFn: () => getJobLogs(owner, repo, selected!.jobId),
-    enabled: !!selected && jobDone(selected.jobId),
-    staleTime: 10_000,
+    enabled: !!selected && jobStarted,
+    refetchInterval: jobDone ? false : 4000,
+    staleTime: jobDone ? 10_000 : 0,
     retry: false,
   })
 
-  const parsedSections = useMemo(() => (rawLog ? parseGithubLog(rawLog) : []), [rawLog])
+  const knownStepNames = useMemo(
+    () => (selectedJob?.steps ?? []).map(s => s.name),
+    [selectedJob],
+  )
+  const parsedSections = useMemo(
+    () => (rawLog ? parseGithubLog(rawLog, knownStepNames) : []),
+    [rawLog, knownStepNames],
+  )
 
   // Match the selected step to its log section: prefer exact/contains name match, else positional order.
   const stepLines: string[] = useMemo(() => {
@@ -211,31 +249,40 @@ export default function WorkflowRunModal({ owner, repo, runId, runName, initialS
               <div className="flex items-center justify-center h-full text-xs text-muted-foreground">
                 Select a step to view logs
               </div>
-            ) : !jobDone(selected.jobId) ? (
+            ) : !jobStarted ? (
               <div className="flex flex-col items-center justify-center h-full gap-2 text-xs text-muted-foreground">
-                <Loader2 size={16} className="animate-spin" />
-                Waiting for step to finish — GitHub only serves logs once a job completes
+                <Clock size={16} />
+                Queued — hasn't started yet
+              </div>
+            ) : stepLines.length > 0 ? (
+              <div className="flex-1 overflow-y-auto font-mono text-[12px] leading-relaxed px-4 py-3">
+                {stepLines.map((line, j) => (
+                  <div key={j} className="flex gap-3 hover:bg-white/5 px-1 -mx-1 rounded">
+                    <span className="select-none text-right shrink-0 w-8 text-neutral-600" style={{ fontSize: 11 }}>{j + 1}</span>
+                    <span className="text-neutral-300 whitespace-pre-wrap break-all">{cleanLine(line)}</span>
+                  </div>
+                ))}
+                {!jobDone && (
+                  <div className="flex items-center gap-1.5 text-neutral-600 px-1 pt-1">
+                    <Loader2 size={11} className="animate-spin" /> streaming…
+                  </div>
+                )}
               </div>
             ) : logLoading ? (
               <div className="flex items-center justify-center h-full gap-2 text-xs text-muted-foreground">
                 <Loader2 size={12} className="animate-spin" /> Loading logs…
               </div>
-            ) : logError ? (
+            ) : logError && jobDone ? (
               <div className="flex items-center justify-center h-full text-xs text-destructive px-6 text-center">
                 {errorMessage(logError, 'Failed to load logs.')}
               </div>
-            ) : stepLines.length === 0 ? (
+            ) : jobDone ? (
               <div className="flex items-center justify-center h-full text-xs text-muted-foreground">
                 No log output for this step.
               </div>
             ) : (
-              <div className="flex-1 overflow-y-auto font-mono text-[12px] leading-relaxed px-4 py-3">
-                {stepLines.map((line, j) => (
-                  <div key={j} className="flex gap-3 hover:bg-white/5 px-1 -mx-1 rounded">
-                    <span className="select-none text-right shrink-0 w-8 text-neutral-600" style={{ fontSize: 11 }}>{j + 1}</span>
-                    <span className="text-neutral-300 whitespace-pre-wrap break-all">{stripTimestamp(line)}</span>
-                  </div>
-                ))}
+              <div className="flex items-center justify-center h-full gap-2 text-xs text-muted-foreground">
+                <Loader2 size={12} className="animate-spin" /> No output yet — still running…
               </div>
             )}
           </div>
