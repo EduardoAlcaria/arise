@@ -359,6 +359,67 @@ public class CicdService {
         }
     }
 
+    /**
+     * Per-step logs for a finished run.
+     *
+     * <p>GitHub's own web UI reads per-step logs from a session-cookie-only internal endpoint
+     * ({@code /commit/{sha}/checks/{checkRunId}/logs/{step}}), which a PAT can't call. The
+     * public API's equivalent is the run-logs archive: a ZIP whose entries are
+     * {@code <job name>/<step number>_<step name>.txt} — one file per step, exactly the split
+     * the UI shows. Only available once the run is complete (409 while still running), so
+     * callers fall back to slicing the whole-job log for in-flight runs.
+     *
+     * @return step number -> log text, for the requested job
+     */
+    public Map<Integer, String> getRunStepLogs(Long userId, String owner, String repo, Long runId, String jobName) {
+        User user = getUser(userId);
+        byte[] zip;
+        try {
+            zip = webClientBuilder.build()
+                    .get()
+                    .uri("https://api.github.com/repos/{owner}/{repo}/actions/runs/{runId}/logs", owner, repo, runId)
+                    .header("Authorization", "token " + user.getGithubToken())
+                    .header("Accept", "application/vnd.github+json")
+                    .exchangeToMono(response -> {
+                        if (response.statusCode().is3xxRedirection()) {
+                            String location = response.headers().asHttpHeaders().getFirst("Location");
+                            if (location == null) return reactor.core.publisher.Mono.just(new byte[0]);
+                            return webClientBuilder.build().get().uri(java.net.URI.create(location))
+                                    .retrieve().bodyToMono(byte[].class);
+                        }
+                        if (response.statusCode().isError()) {
+                            return reactor.core.publisher.Mono.error(new IllegalStateException(
+                                    "GitHub returned " + response.statusCode().value() + " for run logs"));
+                        }
+                        return response.bodyToMono(byte[].class);
+                    })
+                    .block();
+        } catch (Exception e) {
+            log.warn("Failed to fetch run {} log archive: {}", runId, e.getMessage());
+            throw new IllegalArgumentException("Failed to fetch run logs: " + e.getMessage());
+        }
+        if (zip == null || zip.length == 0) return Map.of();
+
+        Map<Integer, String> byStep = new java.util.TreeMap<>();
+        String prefix = jobName + "/";
+        try (var zis = new java.util.zip.ZipInputStream(new java.io.ByteArrayInputStream(zip))) {
+            java.util.zip.ZipEntry entry;
+            while ((entry = zis.getNextEntry()) != null) {
+                String name = entry.getName();
+                if (entry.isDirectory() || !name.startsWith(prefix)) continue;
+                // "<step number>_<step name>.txt"
+                var m = java.util.regex.Pattern.compile("^(\\d+)_").matcher(name.substring(prefix.length()));
+                if (!m.find()) continue;
+                byStep.put(Integer.parseInt(m.group(1)),
+                        new String(zis.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8));
+            }
+        } catch (Exception e) {
+            log.warn("Failed to read run {} log archive: {}", runId, e.getMessage());
+            throw new IllegalArgumentException("Failed to read run logs archive: " + e.getMessage());
+        }
+        return byStep;
+    }
+
     public List<Map<String, Object>> listRunners(Long userId, String owner, String repo) {
         User user = getUser(userId);
         @SuppressWarnings("unchecked")
