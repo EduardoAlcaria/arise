@@ -349,7 +349,7 @@ export default function Deployments() {
                     </div>
                     <div className="divide-y divide-border">
                       {group.runs.map(run => (
-                        <div key={run.id} className="flex items-center gap-3 px-5 py-3 hover:bg-muted/10 transition-colors group">
+                        <div key={run.id} className="flex items-center gap-3 px-5 py-3 min-h-[52px] hover:bg-muted/10 transition-colors group">
                           <div className="flex items-center gap-2 min-w-0 flex-1">
                             <StatusDot status={run.status} />
                             <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full shrink-0 ${statusCls(run.status)}`}>
