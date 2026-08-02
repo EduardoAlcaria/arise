@@ -1019,6 +1019,14 @@ public class DeploymentService {
 
             String prevDir = prev.get().getDeployDir();
             appendLog(current, "Health gate failed — auto-rolling back to previous version at " + prevDir, LogLevel.WARN);
+
+            if (current.getDeployDir() != null && !current.getDeployDir().isBlank()) {
+                var cleanup = sshService.execute(machine,
+                        "cd " + sq(current.getDeployDir()) + " && docker compose down --remove-orphans 2>&1",
+                        sshService.longTimeoutSeconds());
+                appendLog(current, "Cleaned up failed deployment containers: " + cleanup.getStdout(), LogLevel.INFO);
+            }
+
             var result = sshService.execute(machine, "cd " + sq(prevDir) + " && docker compose up -d 2>&1",
                     sshService.longTimeoutSeconds());
             appendLog(current, result.getStdout(), LogLevel.INFO);
