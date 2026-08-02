@@ -33,6 +33,8 @@ public class AuditController {
                         .path(e.getPath())
                         .success(e.isSuccess())
                         .errorMessage(e.getErrorMessage())
+                        .requestBody(e.getRequestBody())
+                        .responseBody(e.getResponseBody())
                         .timestamp(e.getTimestamp())
                         .build());
         return ResponseEntity.ok(page);
