@@ -30,34 +30,35 @@ interface LogSection {
 }
 
 /**
- * GitHub Actions raw logs wrap each step's output in ##[group]<name> / ##[endgroup] markers —
- * but tools like Docker Buildx/BuildKit ALSO emit their own ##[group]/##[endgroup] pairs inside
- * a step's output (one per build stage, e.g. "#1 [internal] load..."), nested one level deep.
- * Only treat a group as a step boundary if its name matches a real step from the job; anything
- * else is nested tool output and stays attached to the current step instead of truncating it.
+ * GitHub Actions raw logs wrap each step's output in ##[group]<text> / ##[endgroup] markers —
+ * one top-level pair per step, in step order. The group's text is NOT the step's configured
+ * name (a `run:` step's group is literally "Run <script>"), so matching by name doesn't work.
+ * Tools like Docker Buildx/BuildKit also emit their OWN ##[group]/##[endgroup] pairs nested
+ * inside a step's output (one per build stage). Track nesting depth structurally instead:
+ * only a group opened while depth is 0 is a real step boundary; anything opened inside an
+ * already-open group is nested tool output and stays attached to the current step.
  */
-function parseGithubLog(raw: string, knownStepNames: string[]): LogSection[] {
-  const known = new Set(knownStepNames.map(s => s.toLowerCase()))
+function parseGithubLog(raw: string): LogSection[] {
   const lines = raw.split('\n')
   const sections: LogSection[] = []
   let current: LogSection | null = null
-  let nestDepth = 0
+  let depth = 0
   for (const line of lines) {
     const groupMatch = line.match(/##\[group\](.*)$/)
     if (groupMatch) {
-      const name = groupMatch[1].trim()
-      if (nestDepth === 0 && known.has(name.toLowerCase())) {
-        current = { name, lines: [] }
+      if (depth === 0) {
+        current = { name: groupMatch[1].trim(), lines: [] }
         sections.push(current)
-        continue
+      } else {
+        current?.lines.push(line)
       }
-      nestDepth++
-      current?.lines.push(line)
+      depth++
       continue
     }
     if (line.includes('##[endgroup]')) {
-      if (nestDepth > 0) { nestDepth--; current?.lines.push(line); continue }
-      current = null
+      depth = Math.max(0, depth - 1)
+      if (depth === 0) current = null
+      else current?.lines.push(line)
       continue
     }
     if (!current) {
@@ -162,26 +163,20 @@ export default function WorkflowRunModal({ owner, repo, runId, runName, initialS
     retry: false,
   })
 
-  const knownStepNames = useMemo(
-    () => (selectedJob?.steps ?? []).map(s => s.name),
-    [selectedJob],
-  )
-  const parsedSections = useMemo(
-    () => (rawLog ? parseGithubLog(rawLog, knownStepNames) : []),
-    [rawLog, knownStepNames],
-  )
+  const parsedSections = useMemo(() => (rawLog ? parseGithubLog(rawLog) : []), [rawLog])
 
-  // Match the selected step to its log section: prefer exact/contains name match, else positional order.
+  // GitHub's group text isn't the step's configured name (e.g. "Run docker compose ..." vs
+  // "Rebuild and restart backend"), so match by position — each top-level group corresponds
+  // to one step from this job, in the same order — falling back to a fuzzy name match only
+  // if the position doesn't line up (e.g. a skipped step GitHub omits entirely from the log).
   const stepLines: string[] = useMemo(() => {
     if (!selected || parsedSections.length === 0) return []
     const named = parsedSections.filter(s => s.name !== '__pre__')
-    const byName = named.find(s => s.name.toLowerCase() === selected.name.toLowerCase())
-      ?? named.find(s => s.name.toLowerCase().includes(selected.name.toLowerCase()) || selected.name.toLowerCase().includes(s.name.toLowerCase()))
-    if (byName) return byName.lines
-    const idx = jobs?.find(j => j.id === selected.jobId)?.steps?.findIndex(s => s.number === selected.number) ?? -1
+    const idx = selectedJob?.steps?.findIndex(s => s.number === selected.number) ?? -1
     if (idx >= 0 && named[idx]) return named[idx].lines
-    return []
-  }, [selected, parsedSections, jobs])
+    const byName = named.find(s => s.name.toLowerCase().includes(selected.name.toLowerCase()) || selected.name.toLowerCase().includes(s.name.toLowerCase()))
+    return byName?.lines ?? []
+  }, [selected, parsedSections, selectedJob])
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60">
