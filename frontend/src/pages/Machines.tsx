@@ -1,9 +1,10 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { getMachines, createMachine, updateMachine, deleteMachine, testMachine, type MachineRequest } from '../api/machines'
-import { Plus, Trash2, Wifi, Terminal, X, Search, Server, Pencil, Loader2 } from 'lucide-react'
+import { Plus, Trash2, Wifi, Terminal, X, Search, Server, Pencil, Loader2, Box } from 'lucide-react'
 import { OsIcon, StatusDot } from '../components/icons'
 import TerminalModal from '../components/TerminalModal'
+import ContainersModal from '../components/ContainersModal'
 import MachineTelemetry from '../components/MachineTelemetry'
 import ErrorBanner, { errorMessage } from '../components/ErrorBanner'
 
@@ -32,6 +33,7 @@ export default function Machines() {
   const [editingId, setEditingId] = useState<number | null>(null)
   const [form, setForm] = useState<MachineRequest>(emptyForm)
   const [terminalModal, setTerminalModal] = useState<{ id: number; name: string } | null>(null)
+  const [containersModal, setContainersModal] = useState<{ id: number; name: string } | null>(null)
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState<'ALL' | 'ONLINE' | 'OFFLINE' | 'ERROR'>('ALL')
   const [testingId, setTestingId] = useState<number | null>(null)
@@ -159,6 +161,13 @@ export default function Machines() {
                   <Terminal size={12} /> Terminal
                 </button>
                 <button
+                  onClick={() => setContainersModal({ id: m.id, name: m.name })}
+                  title="View running containers"
+                  className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-md text-xs text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+                >
+                  <Box size={12} /> Containers
+                </button>
+                <button
                   onClick={() => {
                     setEditingId(m.id)
                     setForm({ name: m.name, host: m.host, port: m.port, sshUser: m.sshUser, privateKey: '', tunnelType: m.tunnelType ?? 'DIRECT', proxyCommand: m.proxyCommand ?? '' })
@@ -283,6 +292,14 @@ export default function Machines() {
           machineId={terminalModal.id}
           machineName={terminalModal.name}
           onClose={() => setTerminalModal(null)}
+        />
+      )}
+
+      {containersModal && (
+        <ContainersModal
+          machineId={containersModal.id}
+          machineName={containersModal.name}
+          onClose={() => setContainersModal(null)}
         />
       )}
     </div>
