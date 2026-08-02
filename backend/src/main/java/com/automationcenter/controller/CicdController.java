@@ -95,7 +95,10 @@ public class CicdController {
         return ResponseEntity.ok(cicdService.getWorkflowJobs(user.getId(), owner, repo, runId));
     }
 
-    @GetMapping(value = "/jobs/{owner}/{repo}/{jobId}/logs", produces = "text/plain")
+    // No explicit `produces` — a String return already serializes as text/plain on success,
+    // and forcing it here made Spring unable to content-negotiate the JSON error body from
+    // GlobalExceptionHandler on failure (406, swallowed to an empty response body).
+    @GetMapping("/jobs/{owner}/{repo}/{jobId}/logs")
     public ResponseEntity<String> getJobLogs(
             @PathVariable String owner,
             @PathVariable String repo,
