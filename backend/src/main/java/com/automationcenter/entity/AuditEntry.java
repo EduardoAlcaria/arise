@@ -29,6 +29,12 @@ public class AuditEntry {
     @Column(columnDefinition = "TEXT")
     private String errorMessage;
 
+    @Column(columnDefinition = "TEXT")
+    private String requestBody;
+
+    @Column(columnDefinition = "TEXT")
+    private String responseBody;
+
     @CreationTimestamp
     private LocalDateTime timestamp;
 }
