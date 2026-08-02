@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { getWorkflowJobs, getJobLogs } from '../api/cicd'
 import { errorMessage } from './ErrorBanner'
@@ -14,79 +14,35 @@ interface Props {
   onClose: () => void
 }
 
-interface FlatStep {
-  jobId: number
-  jobName: string
-  jobStatus: string
-  name: string
-  status: string
-  conclusion: string | null
-  number: number
-}
-
-interface LogSection {
-  name: string
-  lines: string[]
-}
-
-/**
- * GitHub Actions raw logs wrap each step's output in ##[group]<text> / ##[endgroup] markers —
- * one top-level pair per step, in step order. The group's text is NOT the step's configured
- * name (a `run:` step's group is literally "Run <script>"), so matching by name doesn't work.
- * Tools like Docker Buildx/BuildKit also emit their OWN ##[group]/##[endgroup] pairs nested
- * inside a step's output (one per build stage). Track nesting depth structurally instead:
- * only a group opened while depth is 0 is a real step boundary; anything opened inside an
- * already-open group is nested tool output and stays attached to the current step.
- */
-function parseGithubLog(raw: string): LogSection[] {
-  const lines = raw.split('\n')
-  const sections: LogSection[] = []
-  let current: LogSection | null = null
-  let depth = 0
-  for (const line of lines) {
-    const groupMatch = line.match(/##\[group\](.*)$/)
-    if (groupMatch) {
-      if (depth === 0) {
-        current = { name: groupMatch[1].trim(), lines: [] }
-        sections.push(current)
-      } else {
-        current?.lines.push(line)
-      }
-      depth++
-      continue
-    }
-    if (line.includes('##[endgroup]')) {
-      depth = Math.max(0, depth - 1)
-      if (depth === 0) current = null
-      else current?.lines.push(line)
-      continue
-    }
-    if (!current) {
-      if (!sections.length || sections[0].name !== '__pre__') sections.unshift({ name: '__pre__', lines: [] })
-      sections[0].lines.push(line)
-    } else {
-      current.lines.push(line)
-    }
-  }
-  return sections
-}
-
 function stripTimestamp(line: string): string {
   return line.replace(/^\d{4}-\d{2}-\d{2}T[\d:.]+Z\s?/, '')
 }
 
 function stripAnsi(line: string): string {
-  return line.replace(/\x1B\[[0-9;]*[mGKHF]/g, '')
+  // eslint-disable-next-line no-control-regex
+  return line.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, '')
 }
 
+// GitHub's own log view renders group markers as collapsible headers; we just drop the marker
+// text and keep the content, so nothing in the output is hidden.
 function cleanLine(line: string): string {
   return stripAnsi(stripTimestamp(line))
+    .replace(/##\[group\]/g, '')
+    .replace(/##\[endgroup\]/g, '')
+    .replace(/##\[(error|warning|notice|debug|command)\]/g, '')
 }
 
 // Any conclusion other than 'success' (and non-null) counts as a failure for badge coloring —
 // GitHub uses several: failure, cancelled, timed_out, action_required, stale, startup_failure.
 function isFailureConclusion(conclusion: string | null): boolean {
   return !!conclusion && conclusion !== 'success' && conclusion !== 'skipped' && conclusion !== 'neutral'
+}
+
+function lineColor(raw: string): string {
+  if (raw.includes('##[error]')) return '#f87171'
+  if (raw.includes('##[warning]')) return '#fbbf24'
+  if (raw.includes('##[group]')) return '#93c5fd'
+  return '#d4d4d4'
 }
 
 function StepIcon({ status, conclusion }: { status: string; conclusion: string | null }) {
@@ -103,33 +59,20 @@ function StepIcon({ status, conclusion }: { status: string; conclusion: string |
 const TERMINAL_JOB = ['completed']
 
 export default function WorkflowRunModal({ owner, repo, runId, runName, initialStatus, initialConclusion, onClose }: Props) {
-  const [selectedIdx, setSelectedIdx] = useState(0)
-  const [autoFollow, setAutoFollow] = useState(true)
+  const [selectedJobId, setSelectedJobId] = useState<number | null>(null)
+  const [autoScroll, setAutoScroll] = useState(true)
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const bottomRef = useRef<HTMLDivElement>(null)
 
   const { data: jobs } = useQuery({
     queryKey: ['cicd-run-jobs', owner, repo, runId],
     queryFn: () => getWorkflowJobs(owner, repo, runId),
     refetchInterval: q => {
       const js = q.state.data
-      const allDone = js && js.every(j => TERMINAL_JOB.includes(j.status))
+      const allDone = js && js.length > 0 && js.every(j => TERMINAL_JOB.includes(j.status))
       return allDone ? false : 3000
     },
   })
-
-  const steps: FlatStep[] = useMemo(() => {
-    if (!jobs) return []
-    const out: FlatStep[] = []
-    for (const job of jobs) {
-      if (!job.steps || job.steps.length === 0) {
-        out.push({ jobId: job.id, jobName: job.name, jobStatus: job.status, name: job.name, status: job.status, conclusion: job.conclusion, number: 0 })
-        continue
-      }
-      for (const s of job.steps) {
-        out.push({ jobId: job.id, jobName: job.name, jobStatus: job.status, name: s.name, status: s.status, conclusion: s.conclusion, number: s.number })
-      }
-    }
-    return out
-  }, [jobs])
 
   const allDone = !!jobs && jobs.length > 0 && jobs.every(j => TERMINAL_JOB.includes(j.status))
   const anyFailed = !!jobs && jobs.some(j => isFailureConclusion(j.conclusion))
@@ -139,44 +82,39 @@ export default function WorkflowRunModal({ owner, repo, runId, runName, initialS
     ? (initialStatus === 'completed' ? (isFailureConclusion(initialConclusion) ? 'failure' : 'success') : initialStatus)
     : allDone ? (anyFailed ? 'failure' : 'success') : 'in_progress'
 
-  // Auto-follow the currently running step
+  // Default to the running job, else the first one.
   useEffect(() => {
-    if (!autoFollow) return
-    const idx = steps.findIndex(s => s.status === 'in_progress')
-    if (idx >= 0) setSelectedIdx(idx)
-  }, [steps, autoFollow])
+    if (selectedJobId !== null || !jobs?.length) return
+    setSelectedJobId((jobs.find(j => j.status === 'in_progress') ?? jobs[0]).id)
+  }, [jobs, selectedJobId])
 
-  const selected = steps[selectedIdx] ?? null
-  const selectedJob = jobs?.find(j => j.id === selected?.jobId)
+  const selectedJob = jobs?.find(j => j.id === selectedJobId) ?? null
   const jobDone = selectedJob?.status === 'completed'
   const jobStarted = selectedJob ? selectedJob.status !== 'queued' : false
 
-  // GitHub streams job logs to blob storage progressively — try fetching even while the job
-  // is still running (not just once it completes), and keep polling until it's done so the
-  // view updates as more output becomes available, closer to GitHub's own live log view.
-  const { data: rawLog, isFetching: logLoading, error: logError } = useQuery({
-    queryKey: ['cicd-run-job-log', owner, repo, selected?.jobId],
-    queryFn: () => getJobLogs(owner, repo, selected!.jobId),
-    enabled: !!selected && jobStarted,
+  // GitHub's API has no per-step streaming endpoint — the documented approach is to re-download
+  // the job log every few seconds while the job runs. Poll here and render the WHOLE log,
+  // unsliced, so nothing the runner printed is hidden.
+  const { data: rawLog, isFetching: logFetching, error: logError } = useQuery({
+    queryKey: ['cicd-run-job-log', owner, repo, selectedJobId],
+    queryFn: () => getJobLogs(owner, repo, selectedJobId!),
+    enabled: !!selectedJobId && jobStarted,
     refetchInterval: jobDone ? false : 4000,
     staleTime: jobDone ? 10_000 : 0,
     retry: false,
   })
 
-  const parsedSections = useMemo(() => (rawLog ? parseGithubLog(rawLog) : []), [rawLog])
+  const lines = useMemo(() => (rawLog ? rawLog.split('\n') : []), [rawLog])
 
-  // GitHub's group text isn't the step's configured name (e.g. "Run docker compose ..." vs
-  // "Rebuild and restart backend"), so match by position — each top-level group corresponds
-  // to one step from this job, in the same order — falling back to a fuzzy name match only
-  // if the position doesn't line up (e.g. a skipped step GitHub omits entirely from the log).
-  const stepLines: string[] = useMemo(() => {
-    if (!selected || parsedSections.length === 0) return []
-    const named = parsedSections.filter(s => s.name !== '__pre__')
-    const idx = selectedJob?.steps?.findIndex(s => s.number === selected.number) ?? -1
-    if (idx >= 0 && named[idx]) return named[idx].lines
-    const byName = named.find(s => s.name.toLowerCase().includes(selected.name.toLowerCase()) || selected.name.toLowerCase().includes(s.name.toLowerCase()))
-    return byName?.lines ?? []
-  }, [selected, parsedSections, selectedJob])
+  useEffect(() => {
+    if (autoScroll) bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [lines.length, autoScroll])
+
+  const onScroll = () => {
+    const el = scrollRef.current
+    if (!el) return
+    setAutoScroll(el.scrollHeight - el.scrollTop - el.clientHeight < 60)
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60">
@@ -204,76 +142,92 @@ export default function WorkflowRunModal({ owner, repo, runId, runName, initialS
 
         {/* Body */}
         <div className="flex flex-1 min-h-0">
-          {/* Sidebar: jobs + steps */}
+          {/* Sidebar: jobs (selectable) + their steps (status only) */}
           <div className="flex flex-col shrink-0 overflow-y-auto border-r border-border" style={{ width: 280 }}>
             {!jobs ? (
               <div className="flex items-center gap-2 px-4 py-6 text-xs text-muted-foreground">
                 <Loader2 size={12} className="animate-spin" /> Loading jobs…
               </div>
             ) : (
-              jobs.map(job => (
-                <div key={job.id}>
-                  <div className="flex items-center gap-2 px-4 py-2 bg-muted/20 border-b border-border">
-                    <StepIcon status={job.status} conclusion={job.conclusion} />
-                    <span className="text-[12px] font-semibold text-foreground truncate">{job.name}</span>
-                  </div>
-                  {steps.filter(s => s.jobId === job.id).map((step, localIdx) => {
-                    const idx = steps.indexOf(step)
-                    const active = selectedIdx === idx
-                    return (
-                      <button
-                        key={`${job.id}-${step.number}-${localIdx}`}
-                        onClick={() => { setSelectedIdx(idx); setAutoFollow(false) }}
-                        className={`flex items-center gap-2.5 pl-7 pr-4 py-2 text-left w-full transition-colors shrink-0 border-b border-border/50 ${
-                          active ? 'bg-muted/30 border-l-2 border-l-primary' : 'border-l-2 border-l-transparent hover:bg-muted/10'
-                        }`}
+              jobs.map(job => {
+                const active = job.id === selectedJobId
+                return (
+                  <div key={job.id}>
+                    <button
+                      onClick={() => { setSelectedJobId(job.id); setAutoScroll(true) }}
+                      className={`flex items-center gap-2 px-4 py-2 w-full text-left border-b border-border transition-colors ${
+                        active ? 'bg-muted/40 border-l-2 border-l-primary' : 'bg-muted/10 border-l-2 border-l-transparent hover:bg-muted/20'
+                      }`}
+                    >
+                      <StepIcon status={job.status} conclusion={job.conclusion} />
+                      <span className="text-[12px] font-semibold text-foreground truncate">{job.name}</span>
+                    </button>
+                    {(job.steps ?? []).map(step => (
+                      <div
+                        key={`${job.id}-${step.number}`}
+                        className="flex items-center gap-2.5 pl-7 pr-4 py-2 border-b border-border/50"
                       >
                         <StepIcon status={step.status} conclusion={step.conclusion} />
-                        <span className={`text-[12px] truncate ${active ? 'text-foreground' : 'text-muted-foreground'}`}>{step.name}</span>
-                      </button>
-                    )
-                  })}
-                </div>
-              ))
+                        <span className="text-[12px] text-muted-foreground truncate">{step.name}</span>
+                      </div>
+                    ))}
+                  </div>
+                )
+              })
             )}
           </div>
 
-          {/* Log panel — dark/monospace regardless of theme, standard for log viewers */}
+          {/* Log panel — full job output, dark/monospace regardless of theme */}
           <div className="flex-1 flex flex-col min-w-0 min-h-0 bg-[#0a0a0a]">
-            {!selected ? (
+            {!selectedJob ? (
               <div className="flex items-center justify-center h-full text-xs text-muted-foreground">
-                Select a step to view logs
+                Select a job to view its logs
               </div>
             ) : !jobStarted ? (
               <div className="flex flex-col items-center justify-center h-full gap-2 text-xs text-muted-foreground">
-                <Clock size={16} />
-                Queued — hasn't started yet
+                <Clock size={16} /> Queued — hasn't started yet
               </div>
-            ) : stepLines.length > 0 ? (
-              <div className="flex-1 overflow-y-auto font-mono text-[12px] leading-relaxed px-4 py-3">
-                {stepLines.map((line, j) => (
-                  <div key={j} className="flex gap-3 hover:bg-white/5 px-1 -mx-1 rounded">
-                    <span className="select-none text-right shrink-0 w-8 text-neutral-600" style={{ fontSize: 11 }}>{j + 1}</span>
-                    <span className="text-neutral-300 whitespace-pre-wrap break-all">{cleanLine(line)}</span>
-                  </div>
-                ))}
-                {!jobDone && (
-                  <div className="flex items-center gap-1.5 text-neutral-600 px-1 pt-1">
-                    <Loader2 size={11} className="animate-spin" /> streaming…
-                  </div>
-                )}
-              </div>
-            ) : logLoading ? (
+            ) : lines.length > 0 ? (
+              <>
+                <div
+                  ref={scrollRef}
+                  onScroll={onScroll}
+                  className="flex-1 overflow-y-auto font-mono text-[12px] leading-relaxed px-4 py-3"
+                >
+                  {lines.map((line, i) => (
+                    <div key={i} className="flex gap-3 hover:bg-white/5 px-1 -mx-1 rounded">
+                      <span className="select-none text-right shrink-0 w-10 text-neutral-600" style={{ fontSize: 11 }}>{i + 1}</span>
+                      <span style={{ color: lineColor(line), whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{cleanLine(line)}</span>
+                    </div>
+                  ))}
+                  <div ref={bottomRef} />
+                </div>
+                <div className="flex items-center justify-between px-4 py-2 border-t border-border/30 shrink-0">
+                  <span className="text-[11px] text-neutral-500">
+                    {lines.length} line{lines.length !== 1 ? 's' : ''}
+                    {!jobDone && ' · polling every 4s'}
+                  </span>
+                  {!autoScroll && (
+                    <button
+                      onClick={() => { setAutoScroll(true); bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }}
+                      className="flex items-center gap-1.5 text-[12px] text-primary transition-colors"
+                    >
+                      <ArrowDown size={12} /> Bottom
+                    </button>
+                  )}
+                </div>
+              </>
+            ) : logFetching ? (
               <div className="flex items-center justify-center h-full gap-2 text-xs text-muted-foreground">
                 <Loader2 size={12} className="animate-spin" /> Loading logs…
               </div>
-            ) : logError && jobDone ? (
+            ) : logError ? (
               <div className="flex items-center justify-center h-full text-xs text-destructive px-6 text-center">
                 {errorMessage(logError, 'Failed to load logs.')}
               </div>
             ) : jobDone ? (
               <div className="flex items-center justify-center h-full text-xs text-muted-foreground">
-                No log output for this step.
+                No log output for this job.
               </div>
             ) : (
               <div className="flex items-center justify-center h-full gap-2 text-xs text-muted-foreground">
@@ -286,18 +240,11 @@ export default function WorkflowRunModal({ owner, repo, runId, runName, initialS
         {/* Footer */}
         <div className="flex items-center justify-between px-5 py-2.5 border-t border-border shrink-0">
           <span className="text-[11px] text-muted-foreground">
-            {steps.length} step{steps.length !== 1 ? 's' : ''}{!allDone && ' · live'}
+            {jobs?.length ?? 0} job{(jobs?.length ?? 0) !== 1 ? 's' : ''}{!allDone && ' · live'}
           </span>
-          <div className="flex items-center gap-3">
-            {!autoFollow && !allDone && (
-              <button onClick={() => setAutoFollow(true)} className="flex items-center gap-1.5 text-[12px] text-primary transition-colors">
-                <ArrowDown size={12} /> Follow live step
-              </button>
-            )}
-            <button onClick={onClose} className={allDone ? 'btn-primary text-xs py-1.5 px-3.5' : 'btn-ghost text-xs py-1.5 px-3.5'}>
-              {allDone ? 'Close' : 'Hide'}
-            </button>
-          </div>
+          <button onClick={onClose} className={allDone ? 'btn-primary text-xs py-1.5 px-3.5' : 'btn-ghost text-xs py-1.5 px-3.5'}>
+            {allDone ? 'Close' : 'Hide'}
+          </button>
         </div>
       </div>
     </div>
