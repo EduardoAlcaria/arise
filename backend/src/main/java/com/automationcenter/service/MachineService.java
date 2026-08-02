@@ -6,6 +6,7 @@ import com.automationcenter.dto.machine.SshCommandResponse;
 import com.automationcenter.entity.Machine;
 import com.automationcenter.entity.MachineMetric;
 import com.automationcenter.entity.MachineStatus;
+import com.automationcenter.entity.Role;
 import com.automationcenter.entity.TunnelType;
 import com.automationcenter.entity.User;
 import com.automationcenter.exception.ResourceNotFoundException;
@@ -79,7 +80,14 @@ public class MachineService {
     }
 
     public List<MachineResponse> listByOwner(Long ownerId) {
+        if (isAdmin(ownerId)) {
+            return machineRepository.findAll().stream().map(this::toResponse).toList();
+        }
         return machineRepository.findByOwnerId(ownerId).stream().map(this::toResponse).toList();
+    }
+
+    private boolean isAdmin(Long userId) {
+        return userRepository.findById(userId).map(u -> u.getRole() == Role.ADMIN).orElse(false);
     }
 
     public MachineResponse getById(Long id, Long ownerId) {
