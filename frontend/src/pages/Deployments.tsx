@@ -381,7 +381,7 @@ export default function Deployments() {
                               </div>
                             )}
                           </div>
-                          <div className="text-right shrink-0 hidden sm:block">
+                          <div className="text-right shrink-0 hidden sm:flex sm:flex-col sm:justify-center">
                             {run.machineName && (
                               <p className="text-[11px] text-muted-foreground">{run.machineName}</p>
                             )}
