@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { getWorkflowJobs, getJobLogs } from '../api/cicd'
+import { getWorkflowJobs, getJobLogs, getRunStepLogs } from '../api/cicd'
 import { errorMessage } from './ErrorBanner'
 import { X, CheckCircle2, XCircle, Loader2, Circle, Clock, AlertTriangle, ChevronDown, ChevronRight } from 'lucide-react'
 
@@ -130,10 +130,25 @@ export default function WorkflowRunModal({ owner, repo, runId, runName, initialS
     retry: false,
   })
 
-  const chunks = useMemo(() => (rawLog ? sliceByStep(rawLog) : []), [rawLog])
+  // Authoritative per-step logs: the run's log archive has one file per step, keyed by step
+  // number. Only exists once the run is finished, so it's the preferred source when available
+  // and the sliced whole-job log is the live fallback.
+  const { data: stepLogs } = useQuery({
+    queryKey: ['cicd-run-step-logs', owner, repo, runId, selectedJob?.name],
+    queryFn: () => getRunStepLogs(owner, repo, runId, selectedJob!.name),
+    enabled: !!selectedJob && jobDone,
+    staleTime: 5 * 60_000,
+    retry: false,
+  })
 
-  /** Chunks appear in step order; extra trailing chunks fold into the last step. */
-  const linesForStep = (idx: number): string[] => {
+  const chunks = useMemo(() => (rawLog ? sliceByStep(rawLog) : []), [rawLog])
+  const hasAnyLog = chunks.length > 0 || Object.keys(stepLogs ?? {}).length > 0
+
+  const linesForStep = (idx: number, stepNumber: number): string[] => {
+    const exact = stepLogs?.[String(stepNumber)]
+    if (exact !== undefined) return exact.split('\n')
+    // Fallback while the run is still going: chunks appear in step order, trailing ones
+    // (steps GitHub hasn't reported yet) fold into the last known step.
     if (!chunks.length) return []
     if (idx < steps.length - 1) return chunks[idx] ?? []
     return chunks.slice(idx).flat()
@@ -147,7 +162,7 @@ export default function WorkflowRunModal({ owner, repo, runId, runName, initialS
 
   // Like GitHub: successful steps stay collapsed, the failing (or currently running) one opens.
   useEffect(() => {
-    if (autoExpandDone || !steps.length || !chunks.length) return
+    if (autoExpandDone || !steps.length || !hasAnyLog) return
     const failing = steps.findIndex(s => isFailureConclusion(s.conclusion))
     const running = steps.findIndex(s => s.status === 'in_progress')
     const target = failing >= 0 ? failing : running
@@ -156,7 +171,7 @@ export default function WorkflowRunModal({ owner, repo, runId, runName, initialS
       setAutoExpandDone(true)
       requestAnimationFrame(() => stepRefs.current.get(target)?.scrollIntoView({ behavior: 'smooth', block: 'center' }))
     }
-  }, [steps, chunks.length, autoExpandDone])
+  }, [steps, hasAnyLog, autoExpandDone])
 
   const toggle = (i: number) =>
     setExpanded(prev => {
@@ -232,15 +247,15 @@ export default function WorkflowRunModal({ owner, repo, runId, runName, initialS
               <div className="flex flex-col items-center justify-center h-full gap-2 text-xs text-muted-foreground">
                 <Clock size={16} /> Queued — hasn't started yet
               </div>
-            ) : !chunks.length && logFetching ? (
+            ) : !hasAnyLog && logFetching ? (
               <div className="flex items-center justify-center h-full gap-2 text-xs text-muted-foreground">
                 <Loader2 size={12} className="animate-spin" /> Loading logs…
               </div>
-            ) : !chunks.length && logError ? (
+            ) : !hasAnyLog && logError ? (
               <div className="flex items-center justify-center h-full text-xs text-destructive px-6 text-center">
                 {errorMessage(logError, 'Failed to load logs.')}
               </div>
-            ) : !chunks.length ? (
+            ) : !hasAnyLog ? (
               <div className="flex items-center justify-center h-full gap-2 text-xs text-muted-foreground">
                 {jobDone ? 'No log output for this job.' : <><Loader2 size={12} className="animate-spin" /> No output yet…</>}
               </div>
@@ -253,7 +268,7 @@ export default function WorkflowRunModal({ owner, repo, runId, runName, initialS
                 <div className="flex-1 overflow-y-auto">
                   {steps.map((step, i) => {
                     const open = expanded.has(i)
-                    const lines = linesForStep(i)
+                    const lines = linesForStep(i, step.number)
                     return (
                       <div
                         key={`${step.number}-${step.name}`}
