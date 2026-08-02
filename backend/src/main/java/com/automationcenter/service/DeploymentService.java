@@ -469,7 +469,14 @@ public class DeploymentService {
     }
 
     public Page<DeploymentResponse> listByOwner(Long ownerId, Pageable pageable) {
+        if (isAdmin(ownerId)) {
+            return deploymentRepository.findAll(pageable).map(this::toResponse);
+        }
         return deploymentRepository.findByOwnerId(ownerId, pageable).map(this::toResponse);
+    }
+
+    private boolean isAdmin(Long userId) {
+        return userRepository.findById(userId).map(u -> u.getRole() == Role.ADMIN).orElse(false);
     }
 
     public DeploymentResponse getById(Long id, Long ownerId) {
@@ -560,8 +567,32 @@ public class DeploymentService {
             volumeBackupService.backupBeforeRedeploy(source, machine);
         }
 
+        Deployment deployment = deploymentRepository.save(
+                builderFromSource(source, owner, machine, source.getName()).build());
+        executeAsync(deployment.getId());
+        return toResponse(deployment);
+    }
+
+    /**
+     * Deploys a previous deployment's config (services, config files, tunnel, Infisical env)
+     * under a new name and/or to a different machine — lets a working deployment double as a
+     * reusable template instead of every deploy starting from scratch.
+     */
+    public DeploymentResponse deployFromTemplate(Long sourceId, Long ownerId, String name, Long machineId) {
+        Deployment source = findByIdAndOwner(sourceId, ownerId);
+        User owner = userRepository.findById(ownerId).orElseThrow();
+        Machine machine = machineRepository.findByIdAndOwnerId(machineId, ownerId)
+                .orElseThrow(() -> new ResourceNotFoundException("Machine not found: " + machineId));
+
+        Deployment deployment = deploymentRepository.save(
+                builderFromSource(source, owner, machine, name).build());
+        executeAsync(deployment.getId());
+        return toResponse(deployment);
+    }
+
+    private Deployment.DeploymentBuilder builderFromSource(Deployment source, User owner, Machine machine, String name) {
         Deployment.DeploymentBuilder builder = Deployment.builder()
-                .name(source.getName())
+                .name(name)
                 .type(source.getType())
                 .repositoryUrl(source.getRepositoryUrl())
                 .branch(source.getBranch())
@@ -590,9 +621,7 @@ public class DeploymentService {
             builder.infisicalEnvironment(source.getInfisicalEnvironment())
                    .infisicalSecretPath(source.getInfisicalSecretPath());
 
-        Deployment deployment = deploymentRepository.save(builder.build());
-        executeAsync(deployment.getId());
-        return toResponse(deployment);
+        return builder;
     }
 
     public DeploymentResponse addTunnel(Long deploymentId, Long ownerId, String tunnelName, String tunnelHostname, int tunnelAppPort) {
