@@ -274,6 +274,7 @@ public class DeploymentService {
                 var psResult = sshService.execute(machine, "cd " + repoDir + " && docker compose" + composeFileFlag + " ps 2>&1");
                 appendLog(deployment, "--- Container status ---\n" + psResult.getStdout(), LogLevel.INFO);
                 if (!composeHealthy(deployment, machine, repoDir, composeFileFlag)) {
+                    autoRollbackOnHealthFailure(deployment, machine);
                     fail(deployment);
                     return;
                 }
@@ -411,6 +412,7 @@ public class DeploymentService {
             var psResult = sshService.execute(machine, "cd " + baseDir + " && docker compose ps 2>&1");
             appendLog(deployment, "--- Container status ---\n" + psResult.getStdout(), LogLevel.INFO);
             if (!composeHealthy(deployment, machine, baseDir, "")) {
+                autoRollbackOnHealthFailure(deployment, machine);
                 fail(deployment);
                 return;
             }
@@ -993,6 +995,41 @@ public class DeploymentService {
                 + lastBad.stream().map(ComposePsParser.ServiceState::service).toList()
                 + " not healthy after " + (healthCheckTimeoutMs / 1000) + "s.", LogLevel.ERROR);
         return false;
+    }
+
+    /**
+     * Health gate failure leaves the app down: {@link #teardownPreviousDeployment} already
+     * stopped the last-known-good version before this build ran. Bring it back up so a bad
+     * deploy doesn't take down a previously-working app.
+     */
+    private void autoRollbackOnHealthFailure(Deployment current, Machine machine) {
+        try {
+            var prev = current.getRepositoryUrl() != null
+                    ? deploymentRepository.findTopByRepositoryUrlAndMachine_IdAndTypeAndStatusAndIdNotOrderByCreatedAtDesc(
+                            current.getRepositoryUrl(), machine.getId(), current.getType(),
+                            DeploymentStatus.SUCCESS, current.getId())
+                    : deploymentRepository.findTopByNameAndMachine_IdAndTypeAndStatusAndIdNotOrderByCreatedAtDesc(
+                            current.getName(), machine.getId(), current.getType(),
+                            DeploymentStatus.SUCCESS, current.getId());
+
+            if (prev.isEmpty() || prev.get().getDeployDir() == null || prev.get().getDeployDir().isBlank()) {
+                appendLog(current, "Health gate failed — no previous successful deployment to auto-roll-back to.", LogLevel.WARN);
+                return;
+            }
+
+            String prevDir = prev.get().getDeployDir();
+            appendLog(current, "Health gate failed — auto-rolling back to previous version at " + prevDir, LogLevel.WARN);
+            var result = sshService.execute(machine, "cd " + sq(prevDir) + " && docker compose up -d 2>&1",
+                    sshService.longTimeoutSeconds());
+            appendLog(current, result.getStdout(), LogLevel.INFO);
+            if (result.getExitCode() == 0) {
+                appendLog(current, "Auto-rollback restored previous version.", LogLevel.INFO);
+            } else {
+                appendLog(current, "Auto-rollback FAILED to restore previous version: " + result.getStderr(), LogLevel.ERROR);
+            }
+        } catch (Exception e) {
+            appendLog(current, "Auto-rollback failed (non-fatal): " + e.getMessage(), LogLevel.WARN);
+        }
     }
 
     private String getBuildCommand(String stack, String repoDir, boolean isWindows, String composeFile) {
