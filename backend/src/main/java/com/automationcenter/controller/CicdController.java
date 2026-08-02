@@ -107,6 +107,16 @@ public class CicdController {
         return ResponseEntity.ok(cicdService.getJobLogs(user.getId(), owner, repo, jobId));
     }
 
+    @GetMapping("/runs/{owner}/{repo}/{runId}/step-logs")
+    public ResponseEntity<Map<Integer, String>> getRunStepLogs(
+            @PathVariable String owner,
+            @PathVariable String repo,
+            @PathVariable Long runId,
+            @RequestParam String jobName,
+            @AuthenticationPrincipal User user) {
+        return ResponseEntity.ok(cicdService.getRunStepLogs(user.getId(), owner, repo, runId, jobName));
+    }
+
     @GetMapping("/runners")
     public ResponseEntity<List<Map<String, Object>>> listAllRunners(
             @AuthenticationPrincipal User user) {
