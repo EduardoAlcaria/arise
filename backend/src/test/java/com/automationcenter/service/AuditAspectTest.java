@@ -4,6 +4,7 @@ import com.automationcenter.entity.AuditEntry;
 import com.automationcenter.entity.Role;
 import com.automationcenter.entity.User;
 import com.automationcenter.repository.AuditEntryRepository;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.junit.jupiter.api.AfterEach;
@@ -33,7 +34,7 @@ class AuditAspectTest {
 
     @BeforeEach
     void setUp() {
-        aspect = new AuditAspect(auditEntryRepository);
+        aspect = new AuditAspect(auditEntryRepository, new ObjectMapper());
         RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
     }
 
@@ -82,6 +83,26 @@ class AuditAspectTest {
         assertThat(saved.getUsername()).isEqualTo("anonymous");
         assertThat(saved.isSuccess()).isFalse();
         assertThat(saved.getErrorMessage()).isEqualTo("machine not found");
+    }
+
+    @Test
+    void capturesRequestArgsAndUnwrapsResponseEntityBody() throws Throwable {
+        when(request.getMethod()).thenReturn("POST");
+        when(request.getRequestURI()).thenReturn("/api/machines");
+        var reqDto = new java.util.HashMap<String, Object>();
+        reqDto.put("name", "box-1");
+        reqDto.put("privateKey", "super-secret-key");
+        when(joinPoint.getArgs()).thenReturn(new Object[]{reqDto});
+        var respDto = java.util.Map.of("id", 1, "name", "box-1");
+        when(joinPoint.proceed()).thenReturn(org.springframework.http.ResponseEntity.ok(respDto));
+
+        aspect.audit(joinPoint);
+
+        ArgumentCaptor<AuditEntry> captor = ArgumentCaptor.forClass(AuditEntry.class);
+        verify(auditEntryRepository).save(captor.capture());
+        AuditEntry saved = captor.getValue();
+        assertThat(saved.getRequestBody()).contains("box-1").doesNotContain("super-secret-key");
+        assertThat(saved.getResponseBody()).contains("box-1");
     }
 
     @Test
