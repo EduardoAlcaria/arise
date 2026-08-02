@@ -46,6 +46,9 @@ export const triggerWorkflow = (owner: string, repo: string, workflowId: string,
 export const getWorkflowJobs = (owner: string, repo: string, runId: number) =>
   client.get<WorkflowJob[]>(`/cicd/jobs/${owner}/${repo}/${runId}`).then(r => r.data)
 
+export const getJobLogs = (owner: string, repo: string, jobId: number) =>
+  client.get<string>(`/cicd/jobs/${owner}/${repo}/${jobId}/logs`, { responseType: 'text' }).then(r => r.data)
+
 export const listRunners = (owner: string, repo: string) =>
   client.get<Runner[]>(`/cicd/runners/${owner}/${repo}`).then(r => r.data)
 
