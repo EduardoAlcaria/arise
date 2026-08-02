@@ -125,6 +125,26 @@ class DeploymentServiceTest {
                 RabbitMQConfig.DEPLOYMENT_ROUTING_KEY, "DEPLOYMENT_FAILED:" + DEPLOYMENT_ID);
     }
 
+    // Regression: teardownPreviousDeployment stops the last-known-good version before the
+    // new build runs. If the new build then fails its health gate, the old fix left the app
+    // down entirely. Auto-rollback should bring the previous version back up.
+    @Test
+    void executeAsyncAutoRollsBackToPreviousVersionWhenHealthGateFails() {
+        stubComposeHealth("[{\"Service\":\"web\",\"State\":\"exited\",\"ExitCode\":1}]");
+
+        Deployment previousSuccess = Deployment.builder().id(77L).name("widgets")
+                .type(DeploymentType.REPOSITORY).deployDir("/tmp/deploy_77").build();
+        when(deploymentRepository.findTopByRepositoryUrlAndMachine_IdAndTypeAndStatusAndIdNotOrderByCreatedAtDesc(
+                eq("https://github.com/acme/widgets.git"), eq(MACHINE_ID), eq(DeploymentType.REPOSITORY),
+                eq(DeploymentStatus.SUCCESS), eq(DEPLOYMENT_ID)))
+                .thenReturn(Optional.of(previousSuccess));
+
+        service.executeAsync(DEPLOYMENT_ID);
+
+        assertThat(deployment.getStatus()).isEqualTo(DeploymentStatus.FAILED);
+        verify(sshService).execute(eq(machine), eq("cd '/tmp/deploy_77' && docker compose up -d 2>&1"), anyLong());
+    }
+
     @Test
     void executeAsyncStaysSuccessWhenTunnelFails() {
         deployment.setTunnelName("my-tunnel");
