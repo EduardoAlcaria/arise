@@ -6,7 +6,7 @@ import { getDeployments, redeployDeployment } from '../api/deployments'
 import { getAuditLog } from '../api/audit'
 import { getGitHubUser } from '../api/github'
 import { getQueueMetrics } from '../api/queueMetrics'
-import { Server, Rocket, CheckCircle, Plus, Activity, AlertTriangle, RotateCcw, FileText, Radio, ListOrdered } from 'lucide-react'
+import { Server, Rocket, CheckCircle, Plus, Activity, AlertTriangle, RotateCcw, FileText, Radio, ListOrdered, ChevronDown, ChevronRight } from 'lucide-react'
 import { OsIcon, StackIcon, StatusDot } from '../components/icons'
 import Sparkline from '../components/Sparkline'
 import OnboardingGuide from '../components/OnboardingGuide'
@@ -308,6 +308,9 @@ function AuditRow({ entry: a }: { entry: import('../types').AuditEntry }) {
         <code className="text-xs font-mono text-foreground flex-1 truncate">{a.path}</code>
         <span className="text-xs text-muted-foreground shrink-0">{a.username}</span>
         <span className="text-[11px] text-muted-foreground shrink-0">{new Date(a.timestamp).toLocaleString()}</span>
+        <span className="shrink-0 w-3.5">
+          {hasDetail && (open ? <ChevronDown size={13} className="text-muted-foreground" /> : <ChevronRight size={13} className="text-muted-foreground" />)}
+        </span>
       </div>
       {open && (
         <div className="px-5 pb-3 space-y-2">
