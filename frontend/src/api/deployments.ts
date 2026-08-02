@@ -37,6 +37,8 @@ export const createDeployment = (data: DeploymentRequest) => client.post<Deploym
 export const rollbackDeployment = (id: number) => client.post<Deployment>(`/deployments/${id}/rollback`).then((r) => r.data)
 export const redeployDeployment = (id: number) =>
   client.post<Deployment>(`/deployments/${id}/redeploy`).then((r) => r.data)
+export const deployFromTemplate = (id: number, name: string, machineId: number) =>
+  client.post<Deployment>(`/deployments/${id}/deploy-from-template`, { name, machineId }).then((r) => r.data)
 export const getDeploymentLogs = (id: number) => client.get<LogEntry[]>(`/deployments/${id}/logs`).then((r) => r.data)
 export const addDeploymentTunnel = (id: number, tunnelName: string, tunnelHostname: string, tunnelAppPort: number) =>
   client.post<Deployment>(`/deployments/${id}/tunnel`, { tunnelName, tunnelHostname, tunnelAppPort }).then((r) => r.data)
@@ -69,7 +71,9 @@ export function streamDeploymentLogs(
         const parts = buffer.split('\n')
         buffer = parts.pop()!
         for (const part of parts) {
-          if (part.startsWith('data: ')) onMessage(part.slice(6))
+          // Spring's SseEmitter writes "data:<value>" with no space after the colon —
+          // strip an optional single leading space so both forms parse correctly.
+          if (part.startsWith('data:')) onMessage(part.slice(5).replace(/^ /, ''))
         }
       }
     })
