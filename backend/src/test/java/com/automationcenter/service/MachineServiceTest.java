@@ -1,9 +1,12 @@
 package com.automationcenter.service;
 
+import com.automationcenter.dto.machine.MachineResponse;
 import com.automationcenter.dto.machine.SshCommandResponse;
 import com.automationcenter.entity.Machine;
 import com.automationcenter.entity.MachineMetric;
+import com.automationcenter.entity.Role;
 import com.automationcenter.entity.TunnelType;
+import com.automationcenter.entity.User;
 import com.automationcenter.repository.MachineMetricRepository;
 import com.automationcenter.repository.MachineRepository;
 import com.automationcenter.repository.UserRepository;
@@ -15,6 +18,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.List;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
@@ -35,8 +39,9 @@ class MachineServiceTest {
     void setUp() {
         service = new MachineService(machineRepository, userRepository, sshService, machineMetricRepository);
         machine = Machine.builder().id(9L).name("box").host("h").port(22)
-                .sshUser("root").privateKey("key").tunnelType(TunnelType.DIRECT).build();
-        when(machineRepository.findAll()).thenReturn(List.of(machine));
+                .sshUser("root").privateKey("key").tunnelType(TunnelType.DIRECT)
+                .owner(User.builder().id(2L).build()).build();
+        lenient().when(machineRepository.findAll()).thenReturn(List.of(machine));
     }
 
     @Test
@@ -100,5 +105,28 @@ class MachineServiceTest {
         service.pingAll();
 
         verify(machineMetricRepository).deleteAllById(List.of(1L, 2L));
+    }
+
+    @Test
+    void listByOwnerReturnsAllMachinesForAdmin() {
+        User admin = User.builder().id(1L).role(Role.ADMIN).build();
+        when(userRepository.findById(1L)).thenReturn(Optional.of(admin));
+
+        List<MachineResponse> result = service.listByOwner(1L);
+
+        assertThat(result).extracting(MachineResponse::getId).containsExactly(9L);
+        verify(machineRepository, never()).findByOwnerId(anyLong());
+    }
+
+    @Test
+    void listByOwnerScopesToOwnerForRegularUser() {
+        User user = User.builder().id(2L).role(Role.USER).build();
+        when(userRepository.findById(2L)).thenReturn(Optional.of(user));
+        when(machineRepository.findByOwnerId(2L)).thenReturn(List.of(machine));
+
+        List<MachineResponse> result = service.listByOwner(2L);
+
+        assertThat(result).extracting(MachineResponse::getId).containsExactly(9L);
+        verify(machineRepository, never()).findAll();
     }
 }
