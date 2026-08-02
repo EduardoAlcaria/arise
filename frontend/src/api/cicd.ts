@@ -49,6 +49,12 @@ export const getWorkflowJobs = (owner: string, repo: string, runId: number) =>
 export const getJobLogs = (owner: string, repo: string, jobId: number) =>
   client.get<string>(`/cicd/jobs/${owner}/${repo}/${jobId}/logs`, { responseType: 'text' }).then(r => r.data)
 
+/** Per-step logs from the run's log archive — only available once the run has finished. */
+export const getRunStepLogs = (owner: string, repo: string, runId: number, jobName: string) =>
+  client
+    .get<Record<string, string>>(`/cicd/runs/${owner}/${repo}/${runId}/step-logs`, { params: { jobName } })
+    .then(r => r.data)
+
 export const listRunners = (owner: string, repo: string) =>
   client.get<Runner[]>(`/cicd/runners/${owner}/${repo}`).then(r => r.data)
 
