@@ -330,15 +330,27 @@ public class CicdService {
                     .exchangeToMono(response -> {
                         if (response.statusCode().is3xxRedirection()) {
                             String location = response.headers().asHttpHeaders().getFirst("Location");
-                            if (location == null) return reactor.core.publisher.Mono.just("");
-                            return webClientBuilder.build().get().uri(location)
-                                    .retrieve().bodyToMono(String.class);
+                            log.debug("Job {} logs redirected to blob URL", jobId);
+                            if (location == null) {
+                                log.warn("Job {} logs returned {} with no Location header", jobId, response.statusCode());
+                                return reactor.core.publisher.Mono.just("");
+                            }
+                            return webClientBuilder.build().get().uri(location).retrieve().bodyToMono(String.class);
+                        }
+                        if (response.statusCode().isError()) {
+                            return response.bodyToMono(String.class).defaultIfEmpty("").flatMap(body ->
+                                    reactor.core.publisher.Mono.error(new IllegalStateException(
+                                            "GitHub returned " + response.statusCode().value() + " for job logs")));
                         }
                         return response.bodyToMono(String.class);
                     })
                     .block();
         } catch (WebClientResponseException e) {
+            log.warn("Failed to fetch job {} logs: HTTP {} — {}", jobId, e.getStatusCode().value(), e.getResponseBodyAsString());
             throw new IllegalArgumentException("Failed to fetch job logs: HTTP " + e.getStatusCode().value());
+        } catch (Exception e) {
+            log.warn("Failed to fetch job {} logs: {}", jobId, e.getMessage());
+            throw new IllegalArgumentException("Failed to fetch job logs: " + e.getMessage());
         }
     }
 
