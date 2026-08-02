@@ -1,5 +1,6 @@
 package com.automationcenter.controller;
 
+import com.automationcenter.dto.deployment.DeployFromTemplateRequest;
 import com.automationcenter.dto.deployment.DeploymentRequest;
 import com.automationcenter.dto.deployment.DeploymentResponse;
 import com.automationcenter.dto.deployment.TunnelRequest;
@@ -81,6 +82,15 @@ public class DeploymentController {
             @PathVariable Long id,
             @AuthenticationPrincipal User user) {
         return ResponseEntity.ok(deploymentService.redeploy(id, user.getId()));
+    }
+
+    @PostMapping("/{id}/deploy-from-template")
+    public ResponseEntity<DeploymentResponse> deployFromTemplate(
+            @PathVariable Long id,
+            @RequestBody @Valid DeployFromTemplateRequest request,
+            @AuthenticationPrincipal User user) {
+        return ResponseEntity.ok(deploymentService.deployFromTemplate(
+                id, user.getId(), request.getName(), request.getMachineId()));
     }
 
     @PostMapping("/{id}/tunnel")
